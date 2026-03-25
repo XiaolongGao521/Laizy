@@ -1,6 +1,3 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
-import path from 'node:path';
-
 export function createRunState({ runId, goal, repoPath, planPath, milestones, workerLabels = {} }) {
   const now = new Date().toISOString();
   const current = milestones.find((milestone) => !milestone.completed) ?? null;
@@ -27,24 +24,9 @@ export function createRunState({ runId, goal, repoPath, planPath, milestones, wo
       title: milestone.title,
       status: milestone.completed ? 'completed' : 'planned',
       lineNumber: milestone.lineNumber,
+      updatedAt: now,
+      lastNote: null,
     })),
     verification: [],
-    events: [
-      {
-        type: 'run.initialized',
-        at: now,
-        detail: {
-          currentMilestoneId: current?.id ?? null,
-          milestoneCount: milestones.length,
-        },
-      },
-    ],
   };
-}
-
-export function writeRunState(outputPath, runState) {
-  const absolutePath = path.resolve(outputPath);
-  mkdirSync(path.dirname(absolutePath), { recursive: true });
-  writeFileSync(absolutePath, JSON.stringify(runState, null, 2) + '\n', 'utf8');
-  return absolutePath;
 }

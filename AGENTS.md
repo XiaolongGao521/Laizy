@@ -31,6 +31,8 @@ This file provides guidance to AI coding agents working in the Laizy repository.
 - Build / smoke verification: `npm run build`
 - Print next milestone: `node src/index.mjs next --plan IMPLEMENTATION_PLAN.md`
 - Initialize run state: `node src/index.mjs init-run --goal \"...\" --plan IMPLEMENTATION_PLAN.md --out state/runs/<run-id>.json`
+- Transition milestone state: `node src/index.mjs transition --snapshot state/runs/<run-id>.json --milestone <id> --status implementing|verifying|completed|blocked`
+- Rebuild snapshot from event log: `node src/index.mjs snapshot --snapshot state/runs/<run-id>.json`
 - Ralph planning loop: `npm run ralph:plan`
 - Ralph build loop: `npm run ralph:build`
 - Ralph completion tip: if `IMPLEMENTATION_PLAN.md` has no unchecked (`[ ]`) tasks left, run `npm run build`, record the checkpoint in the plan, and stop.

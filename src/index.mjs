@@ -4,11 +4,16 @@ import path from 'node:path';
 import process from 'node:process';
 
 import {
+  initializeRunArtifacts,
+  rebuildSnapshot,
+  transitionMilestone,
+} from './core/events.mjs';
+import {
   getNextIncompleteMilestone,
   loadImplementationPlan,
   summarizePlan,
 } from './core/plan.mjs';
-import { createRunState, writeRunState } from './core/run-state.mjs';
+import { createRunState } from './core/run-state.mjs';
 
 function printHelp() {
   console.log(`Laizy CLI
@@ -16,7 +21,9 @@ function printHelp() {
 Usage:
   node src/index.mjs next --plan <path>
   node src/index.mjs summary --plan <path>
-  node src/index.mjs init-run --goal <text> --plan <path> --out <path> [--run-id <id>]
+  node src/index.mjs init-run --goal <text> --plan <path> --out <snapshot-path> [--run-id <id>]
+  node src/index.mjs transition --snapshot <snapshot-path> --milestone <id> --status <status> [--note <text>]
+  node src/index.mjs snapshot --snapshot <snapshot-path>
 `);
 }
 
@@ -89,7 +96,7 @@ function main() {
   if (command === 'init-run') {
     const planPath = requireOption(options, 'plan');
     const goal = requireOption(options, 'goal');
-    const outputPath = requireOption(options, 'out');
+    const snapshotPath = requireOption(options, 'out');
     const runId = typeof options['run-id'] === 'string' ? options['run-id'] : defaultRunId();
 
     const { milestones, path: resolvedPlanPath } = loadImplementationPlan(planPath);
@@ -101,8 +108,66 @@ function main() {
       milestones,
     });
 
-    const writtenPath = writeRunState(outputPath, runState);
-    console.log(JSON.stringify({ runId, outputPath: path.resolve(writtenPath) }, null, 2));
+    const initialized = initializeRunArtifacts(snapshotPath, runState);
+    console.log(
+      JSON.stringify(
+        {
+          runId,
+          snapshotPath: initialized.snapshotPath,
+          eventLogPath: initialized.eventLogPath,
+          currentMilestoneId: initialized.snapshot.currentMilestoneId,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  if (command === 'transition') {
+    const snapshotPath = requireOption(options, 'snapshot');
+    const milestoneId = requireOption(options, 'milestone');
+    const status = requireOption(options, 'status');
+    const note = typeof options.note === 'string' ? options.note : undefined;
+
+    const updated = transitionMilestone(snapshotPath, {
+      milestoneId,
+      status,
+      note,
+    });
+
+    console.log(
+      JSON.stringify(
+        {
+          snapshotPath: updated.snapshotPath,
+          eventLogPath: updated.eventLogPath,
+          event: updated.event,
+          currentMilestoneId: updated.snapshot.currentMilestoneId,
+          runStatus: updated.snapshot.status,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  if (command === 'snapshot') {
+    const snapshotPath = requireOption(options, 'snapshot');
+    const rebuilt = rebuildSnapshot(snapshotPath);
+    console.log(
+      JSON.stringify(
+        {
+          snapshotPath: rebuilt.snapshotPath,
+          eventLogPath: rebuilt.eventLogPath,
+          eventCount: rebuilt.snapshot.eventCount,
+          currentMilestoneId: rebuilt.snapshot.currentMilestoneId,
+          runStatus: rebuilt.snapshot.status,
+        },
+        null,
+        2,
+      ),
+    );
     return;
   }
 

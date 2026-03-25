@@ -121,17 +121,17 @@ Laizy should treat OpenClaw as the orchestration substrate:
 
 ## v1 milestone intent
 
-The first implementation slice should establish the durable contract:
+The first implemented slices establish the durable contract:
 
 - plan parsing
 - next-milestone selection
 - run-state initialization
+- append-only run events + derived snapshots
 - repo-local workflow documents
 
 Later slices can add:
 
-- event logs
-- verification artifacts
+- richer verification artifacts
 - worker lease/heartbeat tracking
 - watchdog policy
 - recovery strategies

@@ -20,7 +20,8 @@ This bootstrap slice establishes the workflow contract and the first runnable co
 - a small CLI that can:
   - parse `IMPLEMENTATION_PLAN.md`
   - report the next incomplete milestone
-  - initialize a run-state JSON file for a new autonomous run
+  - initialize a run-state snapshot plus adjacent JSONL event log
+  - transition milestone lifecycle state and rebuild the derived snapshot
 
 ## Core idea
 
@@ -47,6 +48,27 @@ node src/index.mjs init-run \
   --goal "Turn a brief into a verified PR" \
   --plan IMPLEMENTATION_PLAN.md \
   --out state/runs/demo-run.json
+```
+
+This writes:
+
+- `state/runs/demo-run.json` — the current derived snapshot
+- `state/runs/demo-run.events.jsonl` — the append-only event log
+
+### Transition a milestone
+
+```bash
+node src/index.mjs transition \
+  --snapshot state/runs/demo-run.json \
+  --milestone L3 \
+  --status implementing \
+  --note "worker picked up the milestone"
+```
+
+### Rebuild the snapshot from the event log
+
+```bash
+node src/index.mjs snapshot --snapshot state/runs/demo-run.json
 ```
 
 ### Build / smoke check

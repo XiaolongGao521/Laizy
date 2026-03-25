@@ -16,11 +16,13 @@ Goal: turn Laizy into a reusable, repo-native autonomous software delivery engin
 - Discovery: a zero-dependency Node ESM bootstrap keeps the first slice deterministic while the orchestration model is still settling.
 - Discovery: encoding milestone parsing early gives later workers a stable, machine-readable contract to follow.
 
-### [ ] L2 - Add persistent event-log-backed run state
-- Introduce append-only run events and derived run snapshots.
-- Support milestone lifecycle transitions (`planned`, `implementing`, `verifying`, `completed`, `blocked`).
-- Keep the storage format simple JSONL + derived snapshot JSON.
+### [x] L2 - Add persistent event-log-backed run state
+- Introduced append-only run events and derived run snapshots.
+- Added milestone lifecycle transitions (`planned`, `implementing`, `verifying`, `completed`, `blocked`).
+- Kept the storage format simple JSONL + derived snapshot JSON.
 - Verification checkpoint: `npm run build`
+- Discovery: storing the full initialized run payload inside the first event makes snapshot rebuilds deterministic without needing a second source of truth.
+- Discovery: keeping snapshots derived and disposable makes watchdog/recovery logic easier to reason about than mutating primary state in place.
 
 ### [ ] L3 - Add planner / implementer command contracts
 - Model worker intents and handoff envelopes as durable JSON documents.
