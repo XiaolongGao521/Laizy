@@ -20,6 +20,13 @@ import {
 import { evaluateRunHealth, writeHealthReport } from '../src/core/health.mjs';
 import { loadImplementationPlan, summarizePlan } from '../src/core/plan.mjs';
 import { createRecoveryPlan, writeRecoveryPlan } from '../src/core/recovery.mjs';
+import {
+  createCronAdapter,
+  createSessionHistoryAdapter,
+  createSessionSendAdapter,
+  createSessionSpawnAdapter,
+  writeOpenClawAdapter,
+} from '../src/core/openclaw.mjs';
 import { createRunState } from '../src/core/run-state.mjs';
 
 function assert(condition, message) {
@@ -46,6 +53,7 @@ runNodeCheck('src/core/events.mjs');
 runNodeCheck('src/core/contracts.mjs');
 runNodeCheck('src/core/health.mjs');
 runNodeCheck('src/core/recovery.mjs');
+runNodeCheck('src/core/openclaw.mjs');
 
 const plan = loadImplementationPlan('IMPLEMENTATION_PLAN.md');
 const summary = summarizePlan(plan.milestones);
@@ -88,6 +96,36 @@ assert(implementerContract.milestone?.id === nextMilestoneId, `expected implemen
 const contractPath = writeContractDocument(path.join(tempDir, 'contracts', 'implementer.json'), implementerContract);
 const persistedContract = JSON.parse(readFileSync(contractPath, 'utf8'));
 assert(persistedContract.milestone?.id === nextMilestoneId, `expected persisted contract to target ${nextMilestoneId}`);
+
+const spawnAdapter = createSessionSpawnAdapter(initialized.snapshot, { worker: 'implementer' });
+assert(spawnAdapter.kind === 'openclaw.sessions_spawn', 'expected spawn adapter document kind');
+assert(spawnAdapter.payload.sessionLabel === 'laizy-implementer', 'expected implementer spawn adapter to use stable label');
+assert(spawnAdapter.payload.promptDocument?.kind === 'implementer.contract', 'expected implementer spawn adapter to embed the implementer contract');
+
+const sendAdapter = createSessionSendAdapter(initialized.snapshot, {
+  worker: 'implementer',
+  message: 'resume milestone execution',
+  mode: 'append',
+});
+assert(sendAdapter.kind === 'openclaw.sessions_send', 'expected send adapter document kind');
+assert(sendAdapter.payload.message === 'resume milestone execution', 'expected send adapter to preserve the steering message');
+
+const historyAdapter = createSessionHistoryAdapter(initialized.snapshot, {
+  worker: 'implementer',
+  limit: 5,
+  includeToolCalls: true,
+});
+assert(historyAdapter.kind === 'openclaw.sessions_history', 'expected history adapter document kind');
+assert(historyAdapter.payload.includeToolCalls === true, 'expected history adapter to preserve tool-call inspection flag');
+
+const cronAdapter = createCronAdapter(initialized.snapshot, { worker: 'watchdog' });
+assert(cronAdapter.kind === 'openclaw.cron', 'expected cron adapter document kind');
+assert(cronAdapter.payload.targetWorker === 'laizy-watchdog', 'expected cron adapter to preserve stable watchdog label');
+assert(cronAdapter.payload.schedule === '*/5 * * * *', 'expected cron adapter to default to five-minute cadence');
+
+const spawnAdapterPath = writeOpenClawAdapter(path.join(tempDir, 'adapters', 'spawn.json'), spawnAdapter);
+const persistedSpawnAdapter = JSON.parse(readFileSync(spawnAdapterPath, 'utf8'));
+assert(persistedSpawnAdapter.payload.sessionLabel === 'laizy-implementer', 'expected persisted spawn adapter to remain machine-readable');
 
 const started = transitionMilestone(snapshotPath, {
   milestoneId: nextMilestoneId,

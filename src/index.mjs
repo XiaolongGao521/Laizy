@@ -29,6 +29,13 @@ import {
   createRecoveryPlan,
   writeRecoveryPlan,
 } from './core/recovery.mjs';
+import {
+  createCronAdapter,
+  createSessionHistoryAdapter,
+  createSessionSendAdapter,
+  createSessionSpawnAdapter,
+  writeOpenClawAdapter,
+} from './core/openclaw.mjs';
 import { createRunState } from './core/run-state.mjs';
 
 function printHelp() {
@@ -47,6 +54,10 @@ Usage:
   node src/index.mjs inspect-health --snapshot <snapshot-path> [--stall-threshold-minutes <n>] [--now <iso>] [--out <report-path>]
   node src/index.mjs plan-recovery --snapshot <snapshot-path> [--stall-threshold-minutes <n>] [--now <iso>] [--out <plan-path>]
   node src/index.mjs record-recovery-action --snapshot <snapshot-path> --action <action> --reason <text> --worker <worker-name> [--milestone <id>] [--note <text>] [--source <value>]
+  node src/index.mjs emit-openclaw-spawn --snapshot <snapshot-path> [--worker <implementer|recovery|watchdog|planner|verifier>] [--milestone <id>] [--runtime <value>] [--out <path>]
+  node src/index.mjs emit-openclaw-send --snapshot <snapshot-path> [--worker <implementer|recovery|watchdog|planner|verifier>] --message <text> [--mode <append|replace>] [--out <path>]
+  node src/index.mjs emit-openclaw-history --snapshot <snapshot-path> [--worker <implementer|recovery|watchdog|planner|verifier>] [--limit <n>] [--since <iso>] [--include-tool-calls] [--out <path>]
+  node src/index.mjs emit-openclaw-cron --snapshot <snapshot-path> [--worker <watchdog|planner|recovery>] [--schedule <cron>] [--prompt <text>] [--job-label <label>] [--out <path>]
 `);
 }
 
@@ -324,6 +335,84 @@ function main() {
         2,
       ),
     );
+    return;
+  }
+
+  if (command === 'emit-openclaw-spawn') {
+    const snapshotPath = requireOption(options, 'snapshot');
+    const rebuilt = rebuildSnapshot(snapshotPath);
+    const document = createSessionSpawnAdapter(rebuilt.snapshot, {
+      worker: typeof options.worker === 'string' ? options.worker : undefined,
+      milestoneId: typeof options.milestone === 'string' ? options.milestone : undefined,
+      runtime: typeof options.runtime === 'string' ? options.runtime : undefined,
+    });
+
+    if (typeof options.out === 'string') {
+      const outputPath = writeOpenClawAdapter(options.out, document);
+      console.log(JSON.stringify({ outputPath, kind: document.kind, worker: document.worker.label }, null, 2));
+      return;
+    }
+
+    console.log(JSON.stringify(document, null, 2));
+    return;
+  }
+
+  if (command === 'emit-openclaw-send') {
+    const snapshotPath = requireOption(options, 'snapshot');
+    const rebuilt = rebuildSnapshot(snapshotPath);
+    const document = createSessionSendAdapter(rebuilt.snapshot, {
+      worker: typeof options.worker === 'string' ? options.worker : undefined,
+      message: requireOption(options, 'message'),
+      mode: typeof options.mode === 'string' ? options.mode : undefined,
+    });
+
+    if (typeof options.out === 'string') {
+      const outputPath = writeOpenClawAdapter(options.out, document);
+      console.log(JSON.stringify({ outputPath, kind: document.kind, worker: document.worker.label }, null, 2));
+      return;
+    }
+
+    console.log(JSON.stringify(document, null, 2));
+    return;
+  }
+
+  if (command === 'emit-openclaw-history') {
+    const snapshotPath = requireOption(options, 'snapshot');
+    const rebuilt = rebuildSnapshot(snapshotPath);
+    const document = createSessionHistoryAdapter(rebuilt.snapshot, {
+      worker: typeof options.worker === 'string' ? options.worker : undefined,
+      limit: typeof options.limit === 'string' ? Number(options.limit) : undefined,
+      since: typeof options.since === 'string' ? options.since : undefined,
+      includeToolCalls: Boolean(options['include-tool-calls']),
+    });
+
+    if (typeof options.out === 'string') {
+      const outputPath = writeOpenClawAdapter(options.out, document);
+      console.log(JSON.stringify({ outputPath, kind: document.kind, worker: document.worker.label }, null, 2));
+      return;
+    }
+
+    console.log(JSON.stringify(document, null, 2));
+    return;
+  }
+
+  if (command === 'emit-openclaw-cron') {
+    const snapshotPath = requireOption(options, 'snapshot');
+    const rebuilt = rebuildSnapshot(snapshotPath);
+    const document = createCronAdapter(rebuilt.snapshot, {
+      worker: typeof options.worker === 'string' ? options.worker : undefined,
+      schedule: typeof options.schedule === 'string' ? options.schedule : undefined,
+      prompt: typeof options.prompt === 'string' ? options.prompt : undefined,
+      jobLabel: typeof options['job-label'] === 'string' ? options['job-label'] : undefined,
+    });
+
+    if (typeof options.out === 'string') {
+      const outputPath = writeOpenClawAdapter(options.out, document);
+      console.log(JSON.stringify({ outputPath, kind: document.kind, worker: document.worker.label }, null, 2));
+      return;
+    }
+
+    console.log(JSON.stringify(document, null, 2));
     return;
   }
 

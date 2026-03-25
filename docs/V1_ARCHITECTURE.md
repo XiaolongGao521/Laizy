@@ -135,4 +135,15 @@ Later slices can add:
 - worker lease/heartbeat tracking
 - watchdog policy
 - recovery strategies
-- OpenClaw transport adapters
+- thinner executable OpenClaw bindings on top of the adapter documents
+
+## OpenClaw adapter boundary
+
+OpenClaw-specific transport/runtime requests should be emitted as adapter documents, not mixed directly into the durable run-state schema. v1 currently targets four adapter surfaces:
+
+- `sessions_spawn` — start a stable-label worker with an attached contract document
+- `sessions_send` — steer an existing stable-label worker session
+- `sessions_history` — inspect recent output for a stable-label worker
+- `cron` — schedule the watchdog cadence without coupling cron metadata to run-state storage
+
+This keeps the core run snapshot portable while still giving the supervisor deterministic machine-readable instructions to execute.

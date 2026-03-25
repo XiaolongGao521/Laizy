@@ -48,11 +48,13 @@ Goal: turn Laizy into a reusable, repo-native autonomous software delivery engin
 - Discovery: recovery plans become much easier to consume when they embed an optional resume contract instead of forcing the recovery worker to recompute implementer scope.
 - Discovery: persisting recovery actions directly into snapshot state gives watchdogs a durable audit trail and prevents repeated blind restarts.
 
-### [ ] L6 - Add OpenClaw orchestration adapters
-- Add adapters for `sessions_spawn`, `sessions_send`, `sessions_history`, and `cron`.
-- Keep OpenClaw transport/runtime details out of the core run-state model.
-- Support the stable worker labels defined in `AGENTS.md`.
-- Verification checkpoint: `npm run build`
+### [x] L6 - Add OpenClaw orchestration adapters
+- Added adapter documents for `sessions_spawn`, `sessions_send`, `sessions_history`, and `cron`.
+- Kept OpenClaw transport/runtime details out of the core run-state model by emitting machine-readable adapter envelopes.
+- Preserved the stable worker labels defined in `AGENTS.md` across all emitted adapter payloads.
+- Verification checkpoint: `/usr/bin/node scripts/build-check.mjs`
+- Discovery: emitting transport requests as standalone adapter documents keeps the durable run snapshot portable while still giving supervisors deterministic OpenClaw instructions.
+- Discovery: stable worker-label resolution belongs in one adapter layer so future runtimes can reuse the same orchestration contract without touching core milestone state.
 
 ### [ ] L7 - Add verification and reviewer loop scaffolding
 - Model verification commands/results as first-class artifacts.

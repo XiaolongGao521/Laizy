@@ -27,6 +27,7 @@ This bootstrap slice establishes the workflow contract and the first runnable co
   - record worker heartbeats in the event log
   - inspect run health and emit machine-readable recovery recommendations
   - plan bounded recovery actions and persist recovery history in the run snapshot
+  - emit adapter documents for OpenClaw `sessions_spawn`, `sessions_send`, `sessions_history`, and `cron`
 
 ## Core idea
 
@@ -140,6 +141,25 @@ node src/index.mjs record-recovery-action \
   --milestone L5 \
   --source watchdog
 ```
+
+### Emit an OpenClaw worker spawn adapter
+
+```bash
+node src/index.mjs emit-openclaw-spawn \
+  --snapshot state/runs/demo-run.json \
+  --worker implementer \
+  --out state/adapters/demo-implementer-spawn.json
+```
+
+### Emit an OpenClaw watchdog cron adapter
+
+```bash
+node src/index.mjs emit-openclaw-cron \
+  --snapshot state/runs/demo-run.json \
+  --out state/adapters/demo-watchdog-cron.json
+```
+
+The adapter payloads keep OpenClaw transport/runtime details out of the core run-state model while preserving the stable worker labels from `AGENTS.md`.
 
 ### Build / smoke check
 
