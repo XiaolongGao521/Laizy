@@ -5,12 +5,18 @@
   "description": "Repo-native autonomous software delivery orchestration built around the Ralph-loop workflow.",
   "type": "module",
   "scripts": {
-    "build": "node scripts/build-check.mjs",
+    "build": "/usr/bin/node scripts/build-check.mjs",
+    "compile": "/usr/bin/npx tsc -p tsconfig.json",
+    "typecheck": "/usr/bin/npx tsc -p tsconfig.json --noEmit",
     "smoke:init": "node src/index.mjs init-run --goal \"smoke test\" --plan IMPLEMENTATION_PLAN.md --out /tmp/laizy-smoke-run.json",
     "ralph:plan": "/root/.openclaw/workspace/ralph-loop.sh --repo \"$PWD\" --mode planning",
     "ralph:build": "/root/.openclaw/workspace/ralph-loop.sh --repo \"$PWD\" --mode build"
   },
   "engines": {
     "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "typescript": "^6.0.2"
   }
 }

@@ -1,39 +1,8 @@
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
-
-import {
-  createImplementerContract,
-  createPlannerIntent,
-  selectNextActionableMilestone,
-  writeContractDocument,
-} from '../src/core/contracts.mjs';
-import {
-  eventLogPathForSnapshot,
-  initializeRunArtifacts,
-  loadRunEvents,
-  recordRecoveryAction,
-  recordVerificationResult,
-  recordWorkerHeartbeat,
-  transitionMilestone,
-} from '../src/core/events.mjs';
-import { evaluateRunHealth, writeHealthReport } from '../src/core/health.mjs';
-import { loadImplementationPlan, summarizePlan } from '../src/core/plan.mjs';
-import { createRecoveryPlan, writeRecoveryPlan } from '../src/core/recovery.mjs';
-import {
-  createCronAdapter,
-  createSessionHistoryAdapter,
-  createSessionSendAdapter,
-  createSessionSpawnAdapter,
-  writeOpenClawAdapter,
-} from '../src/core/openclaw.mjs';
-import { createRunState } from '../src/core/run-state.mjs';
-import {
-  createReviewerOutput,
-  createVerificationCommand,
-  writeVerificationDocument,
-} from '../src/core/verification.mjs';
 
 function assert(condition, message) {
   if (!condition) {
@@ -41,31 +10,91 @@ function assert(condition, message) {
   }
 }
 
-function runNodeCheck(target) {
-  const result = spawnSync(process.execPath, ['--check', target], {
+function run(command, args) {
+  const result = spawnSync(command, args, {
     cwd: process.cwd(),
     encoding: 'utf8',
   });
 
   if (result.status !== 0) {
-    throw new Error(result.stderr || result.stdout || `node --check failed for ${target}`);
+    throw new Error(result.stderr || result.stdout || `${command} ${args.join(' ')} failed`);
   }
+
+  return result;
 }
 
-runNodeCheck('src/index.mjs');
-runNodeCheck('src/core/plan.mjs');
-runNodeCheck('src/core/run-state.mjs');
-runNodeCheck('src/core/events.mjs');
-runNodeCheck('src/core/contracts.mjs');
-runNodeCheck('src/core/health.mjs');
-runNodeCheck('src/core/recovery.mjs');
-runNodeCheck('src/core/openclaw.mjs');
-runNodeCheck('src/core/verification.mjs');
+function importBuiltModule(relativePath) {
+  const absolutePath = path.resolve(relativePath);
+  return import(pathToFileURL(absolutePath).href);
+}
+
+run('/usr/bin/npx', ['tsc', '-p', 'tsconfig.json']);
+run(process.execPath, ['--check', 'dist/src/index.mjs']);
+run(process.execPath, ['--check', 'dist/src/core/plan.mjs']);
+run(process.execPath, ['--check', 'dist/src/core/run-state.mjs']);
+run(process.execPath, ['--check', 'dist/src/core/events.mjs']);
+run(process.execPath, ['--check', 'dist/src/core/contracts.mjs']);
+run(process.execPath, ['--check', 'dist/src/core/health.mjs']);
+run(process.execPath, ['--check', 'dist/src/core/recovery.mjs']);
+run(process.execPath, ['--check', 'dist/src/core/openclaw.mjs']);
+run(process.execPath, ['--check', 'dist/src/core/verification.mjs']);
+
+const [
+  contractsModule,
+  eventsModule,
+  healthModule,
+  planModule,
+  recoveryModule,
+  openClawModule,
+  runStateModule,
+  verificationModule,
+] = await Promise.all([
+  importBuiltModule('dist/src/core/contracts.mjs'),
+  importBuiltModule('dist/src/core/events.mjs'),
+  importBuiltModule('dist/src/core/health.mjs'),
+  importBuiltModule('dist/src/core/plan.mjs'),
+  importBuiltModule('dist/src/core/recovery.mjs'),
+  importBuiltModule('dist/src/core/openclaw.mjs'),
+  importBuiltModule('dist/src/core/run-state.mjs'),
+  importBuiltModule('dist/src/core/verification.mjs'),
+]);
+
+const {
+  createImplementerContract,
+  createPlannerIntent,
+  selectNextActionableMilestone,
+  writeContractDocument,
+} = contractsModule;
+const {
+  eventLogPathForSnapshot,
+  initializeRunArtifacts,
+  loadRunEvents,
+  recordRecoveryAction,
+  recordVerificationResult,
+  recordWorkerHeartbeat,
+  transitionMilestone,
+} = eventsModule;
+const { evaluateRunHealth, writeHealthReport } = healthModule;
+const { loadImplementationPlan, summarizePlan } = planModule;
+const { createRecoveryPlan, writeRecoveryPlan } = recoveryModule;
+const {
+  createCronAdapter,
+  createSessionHistoryAdapter,
+  createSessionSendAdapter,
+  createSessionSpawnAdapter,
+  writeOpenClawAdapter,
+} = openClawModule;
+const { createRunState } = runStateModule;
+const {
+  createReviewerOutput,
+  createVerificationCommand,
+  writeVerificationDocument,
+} = verificationModule;
 
 const plan = loadImplementationPlan('IMPLEMENTATION_PLAN.md');
 const summary = summarizePlan(plan.milestones);
 const nextMilestoneId = summary.next?.id;
-assert(summary.total >= 8, 'expected at least eight milestones in IMPLEMENTATION_PLAN.md');
+assert(summary.total >= 4, 'expected at least four milestones in IMPLEMENTATION_PLAN.md');
 const targetMilestoneId = nextMilestoneId ?? plan.milestones.at(-1)?.id ?? null;
 assert(targetMilestoneId, 'expected IMPLEMENTATION_PLAN.md to contain at least one milestone');
 
@@ -165,8 +194,9 @@ const started = transitionMilestone(snapshotPath, {
   note: 'worker picked up milestone',
 });
 
+const stalledCheckedAt = new Date(Date.parse(started.snapshot.updatedAt) + 30 * 60 * 1000).toISOString();
 const stalledReport = evaluateRunHealth(started.snapshot, {
-  now: '2026-03-25T06:30:00.000Z',
+  now: stalledCheckedAt,
   stallThresholdMinutes: 15,
 });
 assert(stalledReport.overallStatus === 'stalled', 'expected run-health inspection to flag a stalled implementer');

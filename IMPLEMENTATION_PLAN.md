@@ -1,73 +1,32 @@
-# IMPLEMENTATION_PLAN.md
-
-Goal: turn Laizy into a reusable, repo-native autonomous software delivery engine based on the exact Ralph-loop process already used in SillyAvatar.
+Goal: convert Laizy from JavaScript `.mjs` modules to a TypeScript-first repository without a risky flag-day rewrite.
 
 ## Execution rules
-- The plan is the authoritative execution queue for Ralph-style work in this repository.
+- The plan is the authoritative execution queue for TypeScript migration work in this repository.
 - Build mode should advance one highest-priority incomplete milestone at a time.
 - Every completed milestone must be verified, committed once, and pushed.
-- Watchdog and recovery behavior should stay aligned with `AGENTS.md`.
+- Prefer compatibility-safe slices that keep the repo runnable after each milestone.
+- In this environment, use `/usr/bin/node scripts/build-check.mjs` as the primary verification checkpoint unless a stronger TS-aware path is added and passes here.
 
-### [x] L1 - Bootstrap the repo-local Ralph contract and initial run-state CLI
-- Added repository workflow files mirroring the SillyAvatar Ralph process.
-- Added an architecture document clarifying the generalized Laizy model.
-- Added a runnable CLI slice for parsing the plan, reporting the next milestone, and initializing run state.
-- Verification checkpoint: `npm run build`
-- Discovery: a zero-dependency Node ESM bootstrap keeps the first slice deterministic while the orchestration model is still settling.
-- Discovery: encoding milestone parsing early gives later workers a stable, machine-readable contract to follow.
-
-### [x] L2 - Add persistent event-log-backed run state
-- Introduced append-only run events and derived run snapshots.
-- Added milestone lifecycle transitions (`planned`, `implementing`, `verifying`, `completed`, `blocked`).
-- Kept the storage format simple JSONL + derived snapshot JSON.
-- Verification checkpoint: `npm run build`
-- Discovery: storing the full initialized run payload inside the first event makes snapshot rebuilds deterministic without needing a second source of truth.
-- Discovery: keeping snapshots derived and disposable makes watchdog/recovery logic easier to reason about than mutating primary state in place.
-
-### [x] L3 - Add planner / implementer command contracts
-- Model worker intents and handoff envelopes as durable JSON documents.
-- Add commands to select the next actionable milestone and emit implementer instructions.
-- Preserve strict single-milestone scope in the emitted work contract.
-- Verification checkpoint: `npm run build`
-- Discovery: carrying milestone bullet details into run snapshots keeps worker contracts specific without forcing later workers to re-parse the markdown plan.
-- Discovery: emitting planner intent separately from the implementer contract creates a stable handoff seam for future watchdog and recovery workers.
-
-### [x] L4 - Add watchdog inspection and stall detection
-- Add heartbeat metadata and run-health evaluation.
-- Detect idle/stalled implementer states deterministically.
-- Emit machine-readable recovery recommendations instead of freeform text.
-- Verification checkpoint: `npm run build`
-- Discovery: heartbeat events work best as append-only log entries that project into snapshot state, because watchdog inspection can then be fully deterministic from durable artifacts.
-- Discovery: separating `run.health` from `recovery.recommendation` keeps health inspection readable while preserving a strict machine-actionable output for future recovery workers.
-
-### [x] L5 - Add recovery planning and resume logic
-- Convert watchdog findings into bounded recovery actions.
-- Support restart, re-handoff, and blocked-state escalation paths.
-- Record every recovery action in the run event log.
-- Verification checkpoint: `npm run build`
-- Discovery: recovery plans become much easier to consume when they embed an optional resume contract instead of forcing the recovery worker to recompute implementer scope.
-- Discovery: persisting recovery actions directly into snapshot state gives watchdogs a durable audit trail and prevents repeated blind restarts.
-
-### [x] L6 - Add OpenClaw orchestration adapters
-- Added adapter documents for `sessions_spawn`, `sessions_send`, `sessions_history`, and `cron`.
-- Kept OpenClaw transport/runtime details out of the core run-state model by emitting machine-readable adapter envelopes.
-- Preserved the stable worker labels defined in `AGENTS.md` across all emitted adapter payloads.
+### [x] T1 - Add TypeScript toolchain and TS-first package wiring
+- Added `typescript` and `@types/node` as development dependencies.
+- Introduced a repo-local `tsconfig.json` configured for Node ESM output with `allowJs` so the migration can proceed incrementally.
+- Updated package scripts to add explicit `compile` and `typecheck` entry points while keeping `/usr/bin/node scripts/build-check.mjs` as the canonical build verification path.
+- Refreshed `scripts/build-check.mjs` to compile into `dist/` and validate the built artifacts instead of only checking source files in place.
 - Verification checkpoint: `/usr/bin/node scripts/build-check.mjs`
-- Discovery: emitting transport requests as standalone adapter documents keeps the durable run snapshot portable while still giving supervisors deterministic OpenClaw instructions.
-- Discovery: stable worker-label resolution belongs in one adapter layer so future runtimes can reuse the same orchestration contract without touching core milestone state.
+- Discovery: `allowJs` + `NodeNext` lets the repo adopt a TS-first build pipeline before the source conversion is complete, which keeps each migration slice runnable.
+- Discovery: the verification script should derive stall-check timestamps from the active snapshot rather than hard-coding dates, otherwise time-sensitive health assertions become flaky.
 
-### [x] L7 - Add verification and reviewer loop scaffolding
-- Modeled verification commands and persisted verification results as first-class artifacts.
-- Added reviewer/evaluator output contracts for post-implementation checks.
-- Gated milestone completion on explicit passed verification status.
-- Verification checkpoint: `/usr/bin/node scripts/build-check.mjs`
-- Discovery: verification needs its own durable event stream so watchdog and recovery workers can distinguish “not yet verified” from “verified and failed” without scraping logs.
-- Discovery: milestone-completion gating must validate before appending the transition event, otherwise failed completion attempts pollute the run log.
+### [ ] T2 - Convert core planning and run-state modules under `src/core/` to TypeScript
+- Convert the plan, run-state, contracts, events, health, recovery, OpenClaw adapter, and verification modules from `.mjs` to `.ts`.
+- Add explicit shared TypeScript types for milestones, run snapshots, events, adapters, recovery documents, and verification artifacts where that improves safety.
+- Preserve current runtime behavior and machine-readable artifact shapes.
+- Keep ESM-compatible imports/exports and compile cleanly through the new TS build.
 
-### [x] L8 - Add end-to-end example run docs
-- Documented a sample brief-to-run flow using the Laizy CLI artifacts.
-- Showed how the planner, implementer, watchdog, recovery, and verifier workers interact.
-- Captured operator expectations for commit/push/closeout behavior.
-- Verification checkpoint: `/usr/bin/node scripts/build-check.mjs`
-- Discovery: a concrete operator walkthrough exposes contract gaps faster than API-only docs because milestone handoffs become testable end-to-end.
-- Discovery: verification tooling should avoid assuming a fixed next milestone so the same smoke check keeps working as the plan advances.
+### [ ] T3 - Convert the CLI entrypoint and verification script to TypeScript-aware operation
+- Convert `src/index.mjs` to `src/index.ts` and keep command behavior unchanged.
+- Update `scripts/build-check.mjs` only as needed so it validates the compiled TypeScript output and core end-to-end flows.
+- Keep `/usr/bin/node scripts/build-check.mjs` green in this environment.
+
+### [ ] T4 - Refresh repository docs for the TypeScript-first layout
+- Update `README.md` and any directly affected docs/examples to reference `src/*.ts`, compiled output, and the new build expectations.
+- Record the final verification checkpoint and notable migration discoveries in this plan.
