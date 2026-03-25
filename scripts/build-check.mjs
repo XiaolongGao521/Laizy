@@ -29,7 +29,7 @@ function importBuiltModule(relativePath) {
 }
 
 run('/usr/bin/npx', ['tsc', '-p', 'tsconfig.json']);
-run(process.execPath, ['--check', 'dist/src/index.mjs']);
+run(process.execPath, ['--check', 'dist/src/index.js']);
 run(process.execPath, ['--check', 'dist/src/core/plan.js']);
 run(process.execPath, ['--check', 'dist/src/core/run-state.js']);
 run(process.execPath, ['--check', 'dist/src/core/events.js']);

@@ -44,36 +44,39 @@ import {
   createVerificationCommand,
   writeVerificationDocument,
 } from './core/verification.js';
+import type { MilestoneStatus, VerificationStatus, WorkerLabel, WorkerRole } from './core/types.js';
 
 function printHelp() {
   console.log(`Laizy CLI
 
 Usage:
-  node src/index.mjs next --plan <path>
-  node src/index.mjs summary --plan <path>
-  node src/index.mjs init-run --goal <text> --plan <path> --out <snapshot-path> [--run-id <id>]
-  node src/index.mjs transition --snapshot <snapshot-path> --milestone <id> --status <status> [--note <text>]
-  node src/index.mjs snapshot --snapshot <snapshot-path>
-  node src/index.mjs select-milestone --snapshot <snapshot-path>
-  node src/index.mjs emit-implementer-contract --snapshot <snapshot-path> [--out <contract-path>]
-  node src/index.mjs emit-planner-intent --snapshot <snapshot-path> [--out <intent-path>]
-  node src/index.mjs heartbeat --snapshot <snapshot-path> --worker <worker-name> [--note <text>]
-  node src/index.mjs inspect-health --snapshot <snapshot-path> [--stall-threshold-minutes <n>] [--now <iso>] [--out <report-path>]
-  node src/index.mjs plan-recovery --snapshot <snapshot-path> [--stall-threshold-minutes <n>] [--now <iso>] [--out <plan-path>]
-  node src/index.mjs record-recovery-action --snapshot <snapshot-path> --action <action> --reason <text> --worker <worker-name> [--milestone <id>] [--note <text>] [--source <value>]
-  node src/index.mjs emit-openclaw-spawn --snapshot <snapshot-path> [--worker <implementer|recovery|watchdog|planner|verifier>] [--milestone <id>] [--runtime <value>] [--out <path>]
-  node src/index.mjs emit-openclaw-send --snapshot <snapshot-path> [--worker <implementer|recovery|watchdog|planner|verifier>] --message <text> [--mode <append|replace>] [--out <path>]
-  node src/index.mjs emit-openclaw-history --snapshot <snapshot-path> [--worker <implementer|recovery|watchdog|planner|verifier>] [--limit <n>] [--since <iso>] [--include-tool-calls] [--out <path>]
-  node src/index.mjs emit-openclaw-cron --snapshot <snapshot-path> [--worker <watchdog|planner|recovery>] [--schedule <cron>] [--prompt <text>] [--job-label <label>] [--out <path>]
-  node src/index.mjs emit-verification-command --snapshot <snapshot-path> [--milestone <id>] [--command <text>] [--stage <value>] [--out <path>]
-  node src/index.mjs emit-reviewer-output --snapshot <snapshot-path> [--milestone <id>] [--verdict <approved|changes-requested|needs-review>] [--summary <text>] [--next-action <value>] [--finding <text> ...] [--out <path>]
-  node src/index.mjs record-verification-result --snapshot <snapshot-path> --milestone <id> --command <text> --status <pending|passed|failed> [--output-path <path>] [--summary <text>] [--reviewer-output <path>]
+  node dist/src/index.js next --plan <path>
+  node dist/src/index.js summary --plan <path>
+  node dist/src/index.js init-run --goal <text> --plan <path> --out <snapshot-path> [--run-id <id>]
+  node dist/src/index.js transition --snapshot <snapshot-path> --milestone <id> --status <status> [--note <text>]
+  node dist/src/index.js snapshot --snapshot <snapshot-path>
+  node dist/src/index.js select-milestone --snapshot <snapshot-path>
+  node dist/src/index.js emit-implementer-contract --snapshot <snapshot-path> [--out <contract-path>]
+  node dist/src/index.js emit-planner-intent --snapshot <snapshot-path> [--out <intent-path>]
+  node dist/src/index.js heartbeat --snapshot <snapshot-path> --worker <worker-name> [--note <text>]
+  node dist/src/index.js inspect-health --snapshot <snapshot-path> [--stall-threshold-minutes <n>] [--now <iso>] [--out <report-path>]
+  node dist/src/index.js plan-recovery --snapshot <snapshot-path> [--stall-threshold-minutes <n>] [--now <iso>] [--out <plan-path>]
+  node dist/src/index.js record-recovery-action --snapshot <snapshot-path> --action <action> --reason <text> --worker <worker-name> [--milestone <id>] [--note <text>] [--source <value>]
+  node dist/src/index.js emit-openclaw-spawn --snapshot <snapshot-path> [--worker <implementer|recovery|watchdog|planner|verifier>] [--milestone <id>] [--runtime <value>] [--out <path>]
+  node dist/src/index.js emit-openclaw-send --snapshot <snapshot-path> [--worker <implementer|recovery|watchdog|planner|verifier>] --message <text> [--mode <append|replace>] [--out <path>]
+  node dist/src/index.js emit-openclaw-history --snapshot <snapshot-path> [--worker <implementer|recovery|watchdog|planner|verifier>] [--limit <n>] [--since <iso>] [--include-tool-calls] [--out <path>]
+  node dist/src/index.js emit-openclaw-cron --snapshot <snapshot-path> [--worker <watchdog|planner|recovery>] [--schedule <cron>] [--prompt <text>] [--job-label <label>] [--out <path>]
+  node dist/src/index.js emit-verification-command --snapshot <snapshot-path> [--milestone <id>] [--command <text>] [--stage <value>] [--out <path>]
+  node dist/src/index.js emit-reviewer-output --snapshot <snapshot-path> [--milestone <id>] [--verdict <approved|changes-requested|needs-review>] [--summary <text>] [--next-action <value>] [--finding <text> ...] [--out <path>]
+  node dist/src/index.js record-verification-result --snapshot <snapshot-path> --milestone <id> --command <text> --status <pending|passed|failed> [--output-path <path>] [--summary <text>] [--reviewer-output <path>]
 `);
 }
 
-function parseArgs(argv) {
+type CliOptions = Record<string, string | boolean>;
+
+function parseArgs(argv: string[]): { command: string | undefined; options: CliOptions } {
   const [command, ...rest] = argv;
-  const options = {};
+  const options: CliOptions = {};
 
   for (let index = 0; index < rest.length; index += 1) {
     const token = rest[index];
@@ -96,7 +99,7 @@ function parseArgs(argv) {
   return { command, options };
 }
 
-function requireOption(options, key) {
+function requireOption(options: CliOptions, key: string): string {
   const value = options[key];
   if (!value || value === true) {
     throw new Error(`Missing required option --${key}`);
@@ -171,7 +174,7 @@ function main() {
   if (command === 'transition') {
     const snapshotPath = requireOption(options, 'snapshot');
     const milestoneId = requireOption(options, 'milestone');
-    const status = requireOption(options, 'status');
+    const status = requireOption(options, 'status') as MilestoneStatus;
     const note = typeof options.note === 'string' ? options.note : undefined;
 
     const updated = transitionMilestone(snapshotPath, {
@@ -255,7 +258,7 @@ function main() {
 
   if (command === 'heartbeat') {
     const snapshotPath = requireOption(options, 'snapshot');
-    const worker = requireOption(options, 'worker');
+    const worker = requireOption(options, 'worker') as WorkerLabel;
     const note = typeof options.note === 'string' ? options.note : undefined;
     const updated = recordWorkerHeartbeat(snapshotPath, { worker, note, metadata: {} });
     console.log(
@@ -320,7 +323,7 @@ function main() {
     const snapshotPath = requireOption(options, 'snapshot');
     const action = requireOption(options, 'action');
     const reason = requireOption(options, 'reason');
-    const worker = requireOption(options, 'worker');
+    const worker = requireOption(options, 'worker') as WorkerLabel;
     const milestoneId = typeof options.milestone === 'string' ? options.milestone : undefined;
     const note = typeof options.note === 'string' ? options.note : undefined;
     const source = typeof options.source === 'string' ? options.source : undefined;
@@ -352,7 +355,7 @@ function main() {
     const snapshotPath = requireOption(options, 'snapshot');
     const rebuilt = rebuildSnapshot(snapshotPath);
     const document = createSessionSpawnAdapter(rebuilt.snapshot, {
-      worker: typeof options.worker === 'string' ? options.worker : undefined,
+      worker: typeof options.worker === 'string' ? options.worker as WorkerRole : undefined,
       milestoneId: typeof options.milestone === 'string' ? options.milestone : undefined,
       runtime: typeof options.runtime === 'string' ? options.runtime : undefined,
     });
@@ -371,7 +374,7 @@ function main() {
     const snapshotPath = requireOption(options, 'snapshot');
     const rebuilt = rebuildSnapshot(snapshotPath);
     const document = createSessionSendAdapter(rebuilt.snapshot, {
-      worker: typeof options.worker === 'string' ? options.worker : undefined,
+      worker: typeof options.worker === 'string' ? options.worker as WorkerRole : undefined,
       message: requireOption(options, 'message'),
       mode: typeof options.mode === 'string' ? options.mode : undefined,
     });
@@ -390,7 +393,7 @@ function main() {
     const snapshotPath = requireOption(options, 'snapshot');
     const rebuilt = rebuildSnapshot(snapshotPath);
     const document = createSessionHistoryAdapter(rebuilt.snapshot, {
-      worker: typeof options.worker === 'string' ? options.worker : undefined,
+      worker: typeof options.worker === 'string' ? options.worker as WorkerRole : undefined,
       limit: typeof options.limit === 'string' ? Number(options.limit) : undefined,
       since: typeof options.since === 'string' ? options.since : undefined,
       includeToolCalls: Boolean(options['include-tool-calls']),
@@ -410,7 +413,7 @@ function main() {
     const snapshotPath = requireOption(options, 'snapshot');
     const rebuilt = rebuildSnapshot(snapshotPath);
     const document = createCronAdapter(rebuilt.snapshot, {
-      worker: typeof options.worker === 'string' ? options.worker : undefined,
+      worker: typeof options.worker === 'string' ? options.worker as 'watchdog' | 'planner' | 'recovery' : undefined,
       schedule: typeof options.schedule === 'string' ? options.schedule : undefined,
       prompt: typeof options.prompt === 'string' ? options.prompt : undefined,
       jobLabel: typeof options['job-label'] === 'string' ? options['job-label'] : undefined,
@@ -470,7 +473,7 @@ function main() {
     const snapshotPath = requireOption(options, 'snapshot');
     const milestoneId = requireOption(options, 'milestone');
     const commandText = requireOption(options, 'command');
-    const status = requireOption(options, 'status');
+    const status = requireOption(options, 'status') as VerificationStatus;
     let reviewerOutput = null;
 
     if (typeof options['reviewer-output'] === 'string') {

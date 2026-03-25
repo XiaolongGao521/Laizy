@@ -8,7 +8,7 @@
     "build": "/usr/bin/node scripts/build-check.mjs",
     "compile": "/usr/bin/npx tsc -p tsconfig.json",
     "typecheck": "/usr/bin/npx tsc -p tsconfig.json --noEmit",
-
+    "smoke:init": "/usr/bin/npx tsc -p tsconfig.json && node dist/src/index.js init-run --goal \"smoke test\" --plan IMPLEMENTATION_PLAN.md --out /tmp/laizy-smoke-run.json",
     "ralph:plan": "/root/.openclaw/workspace/ralph-loop.sh --repo \"$PWD\" --mode planning",
     "ralph:build": "/root/.openclaw/workspace/ralph-loop.sh --repo \"$PWD\" --mode build"
   },

@@ -25,10 +25,14 @@ Goal: convert Laizy from JavaScript `.mjs` modules to a TypeScript-first reposit
 - Discovery: NodeNext TypeScript conversion works cleanly when source files use runtime `.js` specifiers even before the whole tree is renamed, which makes staged ESM migration much safer.
 - Discovery: dynamic object-literal keys for worker heartbeats need an explicit typed baseline in TS, otherwise the stable worker-label contract gets widened into an unsafe index signature.
 
-### [ ] T3 - Convert the CLI entrypoint and verification script to TypeScript-aware operation
-- Convert `src/index.mjs` to `src/index.ts` and keep command behavior unchanged.
-- Update `scripts/build-check.mjs` only as needed so it validates the compiled TypeScript output and core end-to-end flows.
-- Keep `/usr/bin/node scripts/build-check.mjs` green in this environment.
+### [x] T3 - Convert the CLI entrypoint and verification script to TypeScript-aware operation
+- Converted `src/index.mjs` to `src/index.ts` while preserving the command surface and JSON output behavior.
+- Tightened the CLI option typing enough for `tsc` to validate worker/status arguments without changing runtime semantics.
+- Updated runtime references to use compiled `dist/src/index.js` output, including the smoke-init package script and CLI help text.
+- Kept `scripts/build-check.mjs` green against the compiled TypeScript CLI + core flow in this environment.
+- Verification checkpoint: `/usr/bin/node scripts/build-check.mjs`
+- Discovery: even with `strict` disabled, the CLI still benefits from explicit narrow casts at the command boundary because worker-role and milestone-status unions catch accidental contract drift immediately.
+- Discovery: once the entrypoint becomes TypeScript, the operator-facing help/examples need to point at compiled output instead of source paths or they quietly teach a broken invocation path.
 
 ### [ ] T4 - Refresh repository docs for the TypeScript-first layout
 - Update `README.md` and any directly affected docs/examples to reference `src/*.ts`, compiled output, and the new build expectations.
