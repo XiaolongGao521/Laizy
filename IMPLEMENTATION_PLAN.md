@@ -40,11 +40,13 @@ Goal: turn Laizy into a reusable, repo-native autonomous software delivery engin
 - Discovery: heartbeat events work best as append-only log entries that project into snapshot state, because watchdog inspection can then be fully deterministic from durable artifacts.
 - Discovery: separating `run.health` from `recovery.recommendation` keeps health inspection readable while preserving a strict machine-actionable output for future recovery workers.
 
-### [ ] L5 - Add recovery planning and resume logic
+### [x] L5 - Add recovery planning and resume logic
 - Convert watchdog findings into bounded recovery actions.
 - Support restart, re-handoff, and blocked-state escalation paths.
 - Record every recovery action in the run event log.
 - Verification checkpoint: `npm run build`
+- Discovery: recovery plans become much easier to consume when they embed an optional resume contract instead of forcing the recovery worker to recompute implementer scope.
+- Discovery: persisting recovery actions directly into snapshot state gives watchdogs a durable audit trail and prevents repeated blind restarts.
 
 ### [ ] L6 - Add OpenClaw orchestration adapters
 - Add adapters for `sessions_spawn`, `sessions_send`, `sessions_history`, and `cron`.

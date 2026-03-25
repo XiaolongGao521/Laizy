@@ -13,11 +13,13 @@ import {
   eventLogPathForSnapshot,
   initializeRunArtifacts,
   loadRunEvents,
+  recordRecoveryAction,
   recordWorkerHeartbeat,
   transitionMilestone,
 } from '../src/core/events.mjs';
 import { evaluateRunHealth, writeHealthReport } from '../src/core/health.mjs';
 import { loadImplementationPlan, summarizePlan } from '../src/core/plan.mjs';
+import { createRecoveryPlan, writeRecoveryPlan } from '../src/core/recovery.mjs';
 import { createRunState } from '../src/core/run-state.mjs';
 
 function assert(condition, message) {
@@ -43,12 +45,13 @@ runNodeCheck('src/core/run-state.mjs');
 runNodeCheck('src/core/events.mjs');
 runNodeCheck('src/core/contracts.mjs');
 runNodeCheck('src/core/health.mjs');
+runNodeCheck('src/core/recovery.mjs');
 
 const plan = loadImplementationPlan('IMPLEMENTATION_PLAN.md');
 const summary = summarizePlan(plan.milestones);
 const nextMilestoneId = summary.next?.id;
-assert(summary.total >= 6, 'expected at least six milestones in IMPLEMENTATION_PLAN.md');
-assert(nextMilestoneId === 'L5', 'expected next incomplete milestone to be L5 after stall-detection milestone');
+assert(summary.total >= 7, 'expected at least seven milestones in IMPLEMENTATION_PLAN.md');
+assert(nextMilestoneId === 'L6', 'expected next incomplete milestone to be L6 after recovery-planning milestone');
 
 const tempDir = mkdtempSync(path.join(os.tmpdir(), 'laizy-build-'));
 const snapshotPath = path.join(tempDir, 'run.json');
@@ -102,6 +105,24 @@ assert(
   'expected stalled run-health inspection to emit a restart recommendation',
 );
 
+const recoveryPlan = createRecoveryPlan(started.snapshot, stalledReport);
+assert(recoveryPlan.action === 'restart-implementer', 'expected recovery plan to mirror stalled recommendation');
+assert(recoveryPlan.resumeContract?.milestone?.id === nextMilestoneId, 'expected recovery plan to include bounded resume contract');
+
+const recoveryPlanPath = writeRecoveryPlan(path.join(tempDir, 'recovery', 'plan.json'), recoveryPlan);
+const persistedRecoveryPlan = JSON.parse(readFileSync(recoveryPlanPath, 'utf8'));
+assert(persistedRecoveryPlan.action === 'restart-implementer', 'expected persisted recovery plan to remain machine-readable');
+
+const recoveryRecord = recordRecoveryAction(snapshotPath, {
+  action: recoveryPlan.action,
+  reason: recoveryPlan.reason,
+  worker: recoveryPlan.worker,
+  milestoneId: recoveryPlan.milestoneId,
+  note: 'watchdog requested bounded resume',
+  source: 'watchdog',
+});
+assert(recoveryRecord.snapshot.recovery.length === 1, 'expected recovery action to be persisted in snapshot state');
+
 const heartbeat = recordWorkerHeartbeat(snapshotPath, {
   worker: 'laizy-implementer',
   note: 'still making progress',
@@ -131,16 +152,17 @@ const completed = transitionMilestone(snapshotPath, {
   note: 'verification passed',
 });
 
-assert(completed.snapshot.currentMilestoneId === 'L6', 'expected completed milestone to advance current pointer to L6');
+assert(completed.snapshot.currentMilestoneId === 'L7', 'expected completed milestone to advance current pointer to L7');
 assert(completed.snapshot.status === 'planned', 'expected run to return to planned after a milestone completes');
-assert(completed.snapshot.eventCount === 5, 'expected initialization, heartbeat, and three milestone transitions in event log');
+assert(completed.snapshot.eventCount === 6, 'expected initialization, recovery, heartbeat, and milestone transitions in event log');
 
 const persisted = JSON.parse(readFileSync(snapshotPath, 'utf8'));
-assert(persisted.currentMilestoneId === 'L6', 'expected persisted snapshot to point at L6');
+assert(persisted.currentMilestoneId === 'L7', 'expected persisted snapshot to point at L7');
 assert(persisted.milestones.find((milestone) => milestone.id === nextMilestoneId)?.status === 'completed', 'expected persisted active milestone status to be completed');
+assert(persisted.recovery.length === 1, 'expected persisted snapshot to retain recovery action history');
 
 const events = loadRunEvents(eventLogPathForSnapshot(snapshotPath));
-assert(events.length === 5, 'expected event log to contain five events');
+assert(events.length === 6, 'expected event log to contain six events');
 
 rmSync(tempDir, { recursive: true, force: true });
 console.log('build-check: ok');

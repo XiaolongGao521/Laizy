@@ -26,6 +26,7 @@ This bootstrap slice establishes the workflow contract and the first runnable co
   - emit planner-intent and implementer-contract JSON handoff documents
   - record worker heartbeats in the event log
   - inspect run health and emit machine-readable recovery recommendations
+  - plan bounded recovery actions and persist recovery history in the run snapshot
 
 ## Core idea
 
@@ -118,6 +119,27 @@ node src/index.mjs inspect-health \
 ```
 
 The health report includes a machine-readable recovery recommendation instead of freeform watchdog prose.
+
+### Plan recovery from a health report
+
+```bash
+node src/index.mjs plan-recovery \
+  --snapshot state/runs/demo-run.json \
+  --stall-threshold-minutes 15 \
+  --out state/reports/demo-recovery-plan.json
+```
+
+### Record a recovery action in the event log
+
+```bash
+node src/index.mjs record-recovery-action \
+  --snapshot state/runs/demo-run.json \
+  --action restart-implementer \
+  --reason "implementer heartbeat expired" \
+  --worker laizy-recovery \
+  --milestone L5 \
+  --source watchdog
+```
 
 ### Build / smoke check
 

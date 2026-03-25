@@ -12,6 +12,7 @@ import {
 import {
   initializeRunArtifacts,
   rebuildSnapshot,
+  recordRecoveryAction,
   recordWorkerHeartbeat,
   transitionMilestone,
 } from './core/events.mjs';
@@ -24,6 +25,10 @@ import {
   loadImplementationPlan,
   summarizePlan,
 } from './core/plan.mjs';
+import {
+  createRecoveryPlan,
+  writeRecoveryPlan,
+} from './core/recovery.mjs';
 import { createRunState } from './core/run-state.mjs';
 
 function printHelp() {
@@ -40,6 +45,8 @@ Usage:
   node src/index.mjs emit-planner-intent --snapshot <snapshot-path> [--out <intent-path>]
   node src/index.mjs heartbeat --snapshot <snapshot-path> --worker <worker-name> [--note <text>]
   node src/index.mjs inspect-health --snapshot <snapshot-path> [--stall-threshold-minutes <n>] [--now <iso>] [--out <report-path>]
+  node src/index.mjs plan-recovery --snapshot <snapshot-path> [--stall-threshold-minutes <n>] [--now <iso>] [--out <plan-path>]
+  node src/index.mjs record-recovery-action --snapshot <snapshot-path> --action <action> --reason <text> --worker <worker-name> [--milestone <id>] [--note <text>] [--source <value>]
 `);
 }
 
@@ -263,6 +270,60 @@ function main() {
     }
 
     console.log(JSON.stringify(report, null, 2));
+    return;
+  }
+
+  if (command === 'plan-recovery') {
+    const snapshotPath = requireOption(options, 'snapshot');
+    const rebuilt = rebuildSnapshot(snapshotPath);
+    const report = evaluateRunHealth(rebuilt.snapshot, {
+      now: typeof options.now === 'string' ? options.now : undefined,
+      stallThresholdMinutes:
+        typeof options['stall-threshold-minutes'] === 'string'
+          ? Number(options['stall-threshold-minutes'])
+          : undefined,
+    });
+    const recoveryPlan = createRecoveryPlan(rebuilt.snapshot, report);
+
+    if (typeof options.out === 'string') {
+      const outputPath = writeRecoveryPlan(options.out, recoveryPlan);
+      console.log(JSON.stringify({ outputPath, action: recoveryPlan.action }, null, 2));
+      return;
+    }
+
+    console.log(JSON.stringify(recoveryPlan, null, 2));
+    return;
+  }
+
+  if (command === 'record-recovery-action') {
+    const snapshotPath = requireOption(options, 'snapshot');
+    const action = requireOption(options, 'action');
+    const reason = requireOption(options, 'reason');
+    const worker = requireOption(options, 'worker');
+    const milestoneId = typeof options.milestone === 'string' ? options.milestone : undefined;
+    const note = typeof options.note === 'string' ? options.note : undefined;
+    const source = typeof options.source === 'string' ? options.source : undefined;
+    const updated = recordRecoveryAction(snapshotPath, {
+      action,
+      reason,
+      worker,
+      milestoneId,
+      note,
+      source,
+    });
+
+    console.log(
+      JSON.stringify(
+        {
+          snapshotPath: updated.snapshotPath,
+          eventLogPath: updated.eventLogPath,
+          event: updated.event,
+          recoveryCount: updated.snapshot.recovery.length,
+        },
+        null,
+        2,
+      ),
+    );
     return;
   }
 

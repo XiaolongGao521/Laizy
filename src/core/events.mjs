@@ -84,6 +84,23 @@ export function createWorkerHeartbeatEvent({ worker, note, metadata }) {
   };
 }
 
+export function createRecoveryActionEvent({ action, reason, worker, milestoneId, note, source }) {
+  ensureWorkerName(worker);
+
+  return {
+    type: 'recovery.action',
+    at: new Date().toISOString(),
+    detail: {
+      action,
+      reason,
+      worker,
+      milestoneId: milestoneId ?? null,
+      note: note ?? null,
+      source: source ?? 'manual',
+    },
+  };
+}
+
 export function appendRunEvent(eventLogPath, event) {
   const resolvedPath = path.resolve(eventLogPath);
   mkdirSync(path.dirname(resolvedPath), { recursive: true });
@@ -163,6 +180,19 @@ function applyEvent(snapshot, event) {
       note: event.detail.note ?? null,
       metadata: clone(event.detail.metadata ?? {}),
     };
+  }
+
+  if (event.type === 'recovery.action') {
+    ensureWorkerName(event.detail.worker);
+    snapshot.recovery.push({
+      action: event.detail.action,
+      reason: event.detail.reason,
+      worker: event.detail.worker,
+      milestoneId: event.detail.milestoneId ?? null,
+      note: event.detail.note ?? null,
+      source: event.detail.source ?? 'manual',
+      at: event.at,
+    });
   }
 
   snapshot.updatedAt = event.at;
@@ -250,6 +280,20 @@ export function recordWorkerHeartbeat(snapshotPath, { worker, note, metadata }) 
   const resolvedSnapshotPath = path.resolve(snapshotPath);
   const resolvedEventLogPath = eventLogPathForSnapshot(resolvedSnapshotPath);
   const event = createWorkerHeartbeatEvent({ worker, note, metadata });
+
+  appendRunEvent(resolvedEventLogPath, event);
+  const rebuilt = rebuildSnapshot(resolvedSnapshotPath);
+
+  return {
+    ...rebuilt,
+    event,
+  };
+}
+
+export function recordRecoveryAction(snapshotPath, { action, reason, worker, milestoneId, note, source }) {
+  const resolvedSnapshotPath = path.resolve(snapshotPath);
+  const resolvedEventLogPath = eventLogPathForSnapshot(resolvedSnapshotPath);
+  const event = createRecoveryActionEvent({ action, reason, worker, milestoneId, note, source });
 
   appendRunEvent(resolvedEventLogPath, event);
   const rebuilt = rebuildSnapshot(resolvedSnapshotPath);

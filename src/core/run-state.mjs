@@ -35,6 +35,7 @@ export function createRunState({ runId, goal, repoPath, planPath, milestones, wo
       updatedAt: now,
       lastNote: null,
     })),
+    recovery: [],
     verification: [],
   };
 }
