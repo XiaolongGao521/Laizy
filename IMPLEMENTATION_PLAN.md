@@ -32,11 +32,13 @@ Goal: turn Laizy into a reusable, repo-native autonomous software delivery engin
 - Discovery: carrying milestone bullet details into run snapshots keeps worker contracts specific without forcing later workers to re-parse the markdown plan.
 - Discovery: emitting planner intent separately from the implementer contract creates a stable handoff seam for future watchdog and recovery workers.
 
-### [ ] L4 - Add watchdog inspection and stall detection
+### [x] L4 - Add watchdog inspection and stall detection
 - Add heartbeat metadata and run-health evaluation.
 - Detect idle/stalled implementer states deterministically.
 - Emit machine-readable recovery recommendations instead of freeform text.
 - Verification checkpoint: `npm run build`
+- Discovery: heartbeat events work best as append-only log entries that project into snapshot state, because watchdog inspection can then be fully deterministic from durable artifacts.
+- Discovery: separating `run.health` from `recovery.recommendation` keeps health inspection readable while preserving a strict machine-actionable output for future recovery workers.
 
 ### [ ] L5 - Add recovery planning and resume logic
 - Convert watchdog findings into bounded recovery actions.

@@ -19,6 +19,13 @@ export function createRunState({ runId, goal, repoPath, planPath, milestones, wo
       recovery: workerLabels.recovery ?? 'laizy-recovery',
       verifier: workerLabels.verifier ?? 'laizy-verifier',
     },
+    workerHeartbeats: {
+      [workerLabels.planner ?? 'laizy-planner']: null,
+      [workerLabels.implementer ?? 'laizy-implementer']: null,
+      [workerLabels.watchdog ?? 'laizy-watchdog']: null,
+      [workerLabels.recovery ?? 'laizy-recovery']: null,
+      [workerLabels.verifier ?? 'laizy-verifier']: null,
+    },
     milestones: milestones.map((milestone) => ({
       id: milestone.id,
       title: milestone.title,

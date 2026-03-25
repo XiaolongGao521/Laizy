@@ -12,8 +12,13 @@ import {
 import {
   initializeRunArtifacts,
   rebuildSnapshot,
+  recordWorkerHeartbeat,
   transitionMilestone,
 } from './core/events.mjs';
+import {
+  evaluateRunHealth,
+  writeHealthReport,
+} from './core/health.mjs';
 import {
   getNextIncompleteMilestone,
   loadImplementationPlan,
@@ -33,6 +38,8 @@ Usage:
   node src/index.mjs select-milestone --snapshot <snapshot-path>
   node src/index.mjs emit-implementer-contract --snapshot <snapshot-path> [--out <contract-path>]
   node src/index.mjs emit-planner-intent --snapshot <snapshot-path> [--out <intent-path>]
+  node src/index.mjs heartbeat --snapshot <snapshot-path> --worker <worker-name> [--note <text>]
+  node src/index.mjs inspect-health --snapshot <snapshot-path> [--stall-threshold-minutes <n>] [--now <iso>] [--out <report-path>]
 `);
 }
 
@@ -215,6 +222,47 @@ function main() {
     }
 
     console.log(JSON.stringify(intent, null, 2));
+    return;
+  }
+
+  if (command === 'heartbeat') {
+    const snapshotPath = requireOption(options, 'snapshot');
+    const worker = requireOption(options, 'worker');
+    const note = typeof options.note === 'string' ? options.note : undefined;
+    const updated = recordWorkerHeartbeat(snapshotPath, { worker, note, metadata: {} });
+    console.log(
+      JSON.stringify(
+        {
+          snapshotPath: updated.snapshotPath,
+          eventLogPath: updated.eventLogPath,
+          event: updated.event,
+          heartbeat: updated.snapshot.workerHeartbeats[worker] ?? null,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  if (command === 'inspect-health') {
+    const snapshotPath = requireOption(options, 'snapshot');
+    const rebuilt = rebuildSnapshot(snapshotPath);
+    const report = evaluateRunHealth(rebuilt.snapshot, {
+      now: typeof options.now === 'string' ? options.now : undefined,
+      stallThresholdMinutes:
+        typeof options['stall-threshold-minutes'] === 'string'
+          ? Number(options['stall-threshold-minutes'])
+          : undefined,
+    });
+
+    if (typeof options.out === 'string') {
+      const outputPath = writeHealthReport(options.out, report);
+      console.log(JSON.stringify({ outputPath, overallStatus: report.overallStatus }, null, 2));
+      return;
+    }
+
+    console.log(JSON.stringify(report, null, 2));
     return;
   }
 

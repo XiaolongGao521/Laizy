@@ -15,6 +15,14 @@ const VALID_MILESTONE_STATUSES = new Set([
   'blocked',
 ]);
 
+const VALID_WORKER_NAMES = new Set([
+  'laizy-planner',
+  'laizy-implementer',
+  'laizy-watchdog',
+  'laizy-recovery',
+  'laizy-verifier',
+]);
+
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
@@ -22,6 +30,12 @@ function clone(value) {
 function ensureMilestoneStatus(status) {
   if (!VALID_MILESTONE_STATUSES.has(status)) {
     throw new Error(`Invalid milestone status: ${status}`);
+  }
+}
+
+function ensureWorkerName(worker) {
+  if (!VALID_WORKER_NAMES.has(worker)) {
+    throw new Error(`Invalid worker name: ${worker}`);
   }
 }
 
@@ -52,6 +66,20 @@ export function createMilestoneTransitionEvent({ milestoneId, status, note }) {
       milestoneId,
       status,
       note: note ?? null,
+    },
+  };
+}
+
+export function createWorkerHeartbeatEvent({ worker, note, metadata }) {
+  ensureWorkerName(worker);
+
+  return {
+    type: 'worker.heartbeat',
+    at: new Date().toISOString(),
+    detail: {
+      worker,
+      note: note ?? null,
+      metadata: metadata ?? {},
     },
   };
 }
@@ -127,6 +155,16 @@ function applyEvent(snapshot, event) {
     }
   }
 
+  if (event.type === 'worker.heartbeat') {
+    ensureWorkerName(event.detail.worker);
+    snapshot.workerHeartbeats[event.detail.worker] = {
+      worker: event.detail.worker,
+      at: event.at,
+      note: event.detail.note ?? null,
+      metadata: clone(event.detail.metadata ?? {}),
+    };
+  }
+
   snapshot.updatedAt = event.at;
   snapshot.lastEventAt = event.at;
   snapshot.eventCount += 1;
@@ -198,6 +236,20 @@ export function transitionMilestone(snapshotPath, { milestoneId, status, note })
   const resolvedSnapshotPath = path.resolve(snapshotPath);
   const resolvedEventLogPath = eventLogPathForSnapshot(resolvedSnapshotPath);
   const event = createMilestoneTransitionEvent({ milestoneId, status, note });
+
+  appendRunEvent(resolvedEventLogPath, event);
+  const rebuilt = rebuildSnapshot(resolvedSnapshotPath);
+
+  return {
+    ...rebuilt,
+    event,
+  };
+}
+
+export function recordWorkerHeartbeat(snapshotPath, { worker, note, metadata }) {
+  const resolvedSnapshotPath = path.resolve(snapshotPath);
+  const resolvedEventLogPath = eventLogPathForSnapshot(resolvedSnapshotPath);
+  const event = createWorkerHeartbeatEvent({ worker, note, metadata });
 
   appendRunEvent(resolvedEventLogPath, event);
   const rebuilt = rebuildSnapshot(resolvedSnapshotPath);

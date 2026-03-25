@@ -24,6 +24,8 @@ This bootstrap slice establishes the workflow contract and the first runnable co
   - transition milestone lifecycle state and rebuild the derived snapshot
   - select the next actionable milestone from durable run state
   - emit planner-intent and implementer-contract JSON handoff documents
+  - record worker heartbeats in the event log
+  - inspect run health and emit machine-readable recovery recommendations
 
 ## Core idea
 
@@ -96,6 +98,26 @@ node src/index.mjs emit-implementer-contract \
 ```
 
 The emitted JSON documents preserve strict single-milestone scope and are designed to be handed to the next worker without relying on freeform prompt state.
+
+### Record a worker heartbeat
+
+```bash
+node src/index.mjs heartbeat \
+  --snapshot state/runs/demo-run.json \
+  --worker laizy-implementer \
+  --note "implemented parser branch"
+```
+
+### Inspect run health
+
+```bash
+node src/index.mjs inspect-health \
+  --snapshot state/runs/demo-run.json \
+  --stall-threshold-minutes 15 \
+  --out state/reports/demo-health.json
+```
+
+The health report includes a machine-readable recovery recommendation instead of freeform watchdog prose.
 
 ### Build / smoke check
 
