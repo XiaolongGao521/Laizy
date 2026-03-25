@@ -12,13 +12,13 @@ Laizy is a repo-native autonomous software factory built around the exact Ralph-
 
 ## Current scope
 
-This bootstrap slice establishes the workflow contract and the first runnable core:
+This TypeScript-first bootstrap slice establishes the workflow contract and the first runnable core:
 
 - repo-local `AGENTS.md` with the Laizy Ralph-loop operating model
 - `IMPLEMENTATION_PLAN.md` with milestone-based execution order
 - `docs/V1_ARCHITECTURE.md` describing the generalized run model
 - `docs/EXAMPLE_RUN.md` showing an end-to-end brief-to-run flow
-- a small CLI that can:
+- a small TypeScript CLI (`src/**/*.ts`) that compiles to runnable ESM output under `dist/` and can:
   - parse `IMPLEMENTATION_PLAN.md`
   - report the next incomplete milestone
   - initialize a run-state snapshot plus adjacent JSONL event log
@@ -47,13 +47,13 @@ Laizy is not "one big autonomous prompt." It is a deterministic delivery loop wi
 ### Show the next milestone
 
 ```bash
-node src/index.mjs next --plan IMPLEMENTATION_PLAN.md
+node dist/src/index.js next --plan IMPLEMENTATION_PLAN.md
 ```
 
 ### Initialize a run file
 
 ```bash
-node src/index.mjs init-run \
+node dist/src/index.js init-run \
   --goal "Turn a brief into a verified PR" \
   --plan IMPLEMENTATION_PLAN.md \
   --out state/runs/demo-run.json
@@ -67,7 +67,7 @@ This writes:
 ### Transition a milestone
 
 ```bash
-node src/index.mjs transition \
+node dist/src/index.js transition \
   --snapshot state/runs/demo-run.json \
   --milestone L3 \
   --status implementing \
@@ -77,19 +77,19 @@ node src/index.mjs transition \
 ### Rebuild the snapshot from the event log
 
 ```bash
-node src/index.mjs snapshot --snapshot state/runs/demo-run.json
+node dist/src/index.js snapshot --snapshot state/runs/demo-run.json
 ```
 
 ### Select the next actionable milestone from the run snapshot
 
 ```bash
-node src/index.mjs select-milestone --snapshot state/runs/demo-run.json
+node dist/src/index.js select-milestone --snapshot state/runs/demo-run.json
 ```
 
 ### Emit a planner intent
 
 ```bash
-node src/index.mjs emit-planner-intent \
+node dist/src/index.js emit-planner-intent \
   --snapshot state/runs/demo-run.json \
   --out state/contracts/demo-planner-intent.json
 ```
@@ -97,7 +97,7 @@ node src/index.mjs emit-planner-intent \
 ### Emit an implementer contract
 
 ```bash
-node src/index.mjs emit-implementer-contract \
+node dist/src/index.js emit-implementer-contract \
   --snapshot state/runs/demo-run.json \
   --out state/contracts/demo-implementer-contract.json
 ```
@@ -107,7 +107,7 @@ The emitted JSON documents preserve strict single-milestone scope and are design
 ### Record a worker heartbeat
 
 ```bash
-node src/index.mjs heartbeat \
+node dist/src/index.js heartbeat \
   --snapshot state/runs/demo-run.json \
   --worker laizy-implementer \
   --note "implemented parser branch"
@@ -116,7 +116,7 @@ node src/index.mjs heartbeat \
 ### Inspect run health
 
 ```bash
-node src/index.mjs inspect-health \
+node dist/src/index.js inspect-health \
   --snapshot state/runs/demo-run.json \
   --stall-threshold-minutes 15 \
   --out state/reports/demo-health.json
@@ -127,7 +127,7 @@ The health report includes a machine-readable recovery recommendation instead of
 ### Plan recovery from a health report
 
 ```bash
-node src/index.mjs plan-recovery \
+node dist/src/index.js plan-recovery \
   --snapshot state/runs/demo-run.json \
   --stall-threshold-minutes 15 \
   --out state/reports/demo-recovery-plan.json
@@ -136,7 +136,7 @@ node src/index.mjs plan-recovery \
 ### Record a recovery action in the event log
 
 ```bash
-node src/index.mjs record-recovery-action \
+node dist/src/index.js record-recovery-action \
   --snapshot state/runs/demo-run.json \
   --action restart-implementer \
   --reason "implementer heartbeat expired" \
@@ -148,7 +148,7 @@ node src/index.mjs record-recovery-action \
 ### Emit an OpenClaw worker spawn adapter
 
 ```bash
-node src/index.mjs emit-openclaw-spawn \
+node dist/src/index.js emit-openclaw-spawn \
   --snapshot state/runs/demo-run.json \
   --worker implementer \
   --out state/adapters/demo-implementer-spawn.json
@@ -157,7 +157,7 @@ node src/index.mjs emit-openclaw-spawn \
 ### Emit an OpenClaw watchdog cron adapter
 
 ```bash
-node src/index.mjs emit-openclaw-cron \
+node dist/src/index.js emit-openclaw-cron \
   --snapshot state/runs/demo-run.json \
   --out state/adapters/demo-watchdog-cron.json
 ```
@@ -167,7 +167,7 @@ The adapter payloads keep OpenClaw transport/runtime details out of the core run
 ### Emit a verification command
 
 ```bash
-node src/index.mjs emit-verification-command \
+node dist/src/index.js emit-verification-command \
   --snapshot state/runs/demo-run.json \
   --command "/usr/bin/node scripts/build-check.mjs" \
   --out state/verification/demo-command.json
@@ -176,14 +176,14 @@ node src/index.mjs emit-verification-command \
 ### Emit reviewer output and record a verification result
 
 ```bash
-node src/index.mjs emit-reviewer-output \
+node dist/src/index.js emit-reviewer-output \
   --snapshot state/runs/demo-run.json \
   --verdict approved \
   --summary "build-check passed" \
   --next-action complete-milestone \
   --out state/verification/demo-review.json
 
-node src/index.mjs record-verification-result \
+node dist/src/index.js record-verification-result \
   --snapshot state/runs/demo-run.json \
   --milestone L7 \
   --command "/usr/bin/node scripts/build-check.mjs" \

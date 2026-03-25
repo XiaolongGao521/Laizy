@@ -26,7 +26,7 @@ Goal: convert Laizy from JavaScript `.mjs` modules to a TypeScript-first reposit
 - Discovery: dynamic object-literal keys for worker heartbeats need an explicit typed baseline in TS, otherwise the stable worker-label contract gets widened into an unsafe index signature.
 
 ### [x] T3 - Convert the CLI entrypoint and verification script to TypeScript-aware operation
-- Converted `src/index.mjs` to `src/index.ts` while preserving the command surface and JSON output behavior.
+- Converted `src/index.ts` to `src/index.ts` while preserving the command surface and JSON output behavior.
 - Tightened the CLI option typing enough for `tsc` to validate worker/status arguments without changing runtime semantics.
 - Updated runtime references to use compiled `dist/src/index.js` output, including the smoke-init package script and CLI help text.
 - Kept `scripts/build-check.mjs` green against the compiled TypeScript CLI + core flow in this environment.
@@ -34,6 +34,10 @@ Goal: convert Laizy from JavaScript `.mjs` modules to a TypeScript-first reposit
 - Discovery: even with `strict` disabled, the CLI still benefits from explicit narrow casts at the command boundary because worker-role and milestone-status unions catch accidental contract drift immediately.
 - Discovery: once the entrypoint becomes TypeScript, the operator-facing help/examples need to point at compiled output instead of source paths or they quietly teach a broken invocation path.
 
-### [ ] T4 - Refresh repository docs for the TypeScript-first layout
-- Update `README.md` and any directly affected docs/examples to reference `src/*.ts`, compiled output, and the new build expectations.
-- Record the final verification checkpoint and notable migration discoveries in this plan.
+### [x] T4 - Refresh repository docs for the TypeScript-first layout
+- Updated `README.md`, `docs/EXAMPLE_RUN.md`, and `AGENTS.md` to reference the compiled `dist/src/index.js` CLI path instead of the removed source `.mjs` entrypoint.
+- Refreshed README copy to describe the repo as a TypeScript-first layout that compiles to runnable ESM output under `dist/`.
+- Recorded the final migration verification checkpoint and discoveries in this plan.
+- Verification checkpoint: `/usr/bin/node scripts/build-check.mjs`
+- Discovery: for a Node ESM TypeScript repo, operator docs must distinguish source layout (`src/**/*.ts`) from executable layout (`dist/**/*.js`) or users will follow stale source-path examples.
+- Discovery: keeping verification anchored on the same compiled CLI path used in docs makes migration regressions obvious, because documentation drift and runtime drift fail in the same place.
