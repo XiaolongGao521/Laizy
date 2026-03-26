@@ -25,9 +25,11 @@ Goal: allow the Laizy supervisor process to choose model, reasoning mode, and th
 - Verification checkpoint: `/usr/bin/node scripts/build-check.mjs`
 - Completed 2026-03-26: supervisor decisions now emit runtime profiles, action entries inherit them, implementer/recovery spawn adapters carry model/thinking/reasoning metadata, and verification documents expose explicit runtime-profile data.
 
-### [ ] R3 - Refresh README and verification coverage for runtime-profile-aware supervision
+### [x] R3 - Refresh README and verification coverage for runtime-profile-aware supervision
 - Update `README.md` to explain that `supervisor-tick` now chooses runtime profile as well as next action.
 - Document the intended operator contract around automatic model/thinking/reasoning selection and any conservative defaults.
 - Extend `scripts/build-check.mjs` to assert that the emitted bundles include the expected runtime profile data across representative supervisor decisions.
 - Record the final verification checkpoint and notable discoveries in this plan.
 - Verification checkpoint: `/usr/bin/node scripts/build-check.mjs`
+- Completed 2026-03-26: README now explains runtime-profile-aware `supervisor-tick` operation and the conservative hidden-reasoning default; `scripts/build-check.mjs` asserts runtime profile presence across continue/recover/verify flows plus bundle/adaptor emission.
+- Notable discovery: milestone details often include a verification-checkpoint line, so scope classification must prioritize core runtime keywords ahead of generic verification keywords to avoid false `verification` classification during implementation milestones.

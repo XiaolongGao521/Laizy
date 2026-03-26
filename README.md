@@ -74,6 +74,7 @@ This is the primary Laizy-native operator path.
 - `start-run` handles bootstrap once and writes the initial bundle.
 - `supervisor-tick` is the continuation wrapper for every later decision point.
 - The wrapper reads the durable snapshot and event log, rebuilds the current state, evaluates health, and emits the next bounded machine-readable action bundle.
+- Each supervisor decision now also includes a bounded runtime profile: selected `model`, `thinking`, `reasoningMode`, and classified `scope` for the next action.
 - Operators and chat supervisors should consume the emitted bundle instead of re-reasoning in freeform chat about what to do next.
 
 That makes continuation deterministic across normal progress, stalled workers, verification handoff, and final closeout.
@@ -124,6 +125,7 @@ Typical emitted artifacts include:
 - a stable supervisor manifest describing the decision
 - the decision-specific handoff document (`implementer`, `recovery`, `verification`, or `closeout`)
 - any OpenClaw adapter payloads needed for that next step
+- explicit runtime-profile data in the decision and next-step documents so downstream tooling can see the intended `model`, `thinking`, and `reasoningMode`
 - closeout-specific watchdog disable guidance when the plan is complete
 
 The important contract is that the supervisor bundle becomes the source of truth for the next action. A chat-based watchdog or operator should read the manifest and execute the emitted bounded document, not improvise the next step from memory.
@@ -244,6 +246,21 @@ node dist/src/index.js emit-openclaw-cron \
 ```
 
 The adapter payloads keep OpenClaw transport/runtime details out of the core run-state model while preserving the stable worker labels from `AGENTS.md`.
+
+For runtime-profile-aware flows, spawn/verification artifacts now expose:
+
+- `model` — the bounded model family selected for the next worker handoff
+- `thinking` — low/medium/high effort chosen deterministically from action + milestone scope
+- `reasoningMode` — explicit machine-readable reasoning visibility mode
+- `scope` — the supervisor's simple heuristic classification of the active milestone (`docs`, `verification`, `core-runtime`, or generic implementation)
+
+The first heuristic is intentionally conservative and deterministic:
+
+- docs/README-style work tends toward a smaller model and low thinking
+- core runtime/supervisor/recovery work tends toward the primary model and high thinking
+- recovery stays high-thinking
+- closeout stays cheap
+- reasoning visibility defaults to `hidden` for shared/group-safe operation unless an operator explicitly chooses otherwise
 
 ### Emit a verification command
 
