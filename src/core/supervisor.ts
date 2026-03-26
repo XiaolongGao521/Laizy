@@ -4,9 +4,10 @@ import { createImplementerContract, selectNextActionableMilestone, writeContract
 import { evaluateRunHealth } from './health.js';
 import { createCronAdapter, createSessionSpawnAdapter, writeOpenClawAdapter } from './openclaw.js';
 import { createRecoveryPlan, writeRecoveryPlan } from './recovery.js';
+import { selectSupervisorRuntimeProfile } from './runtime-profile.js';
 import { createVerificationCommand, writeVerificationDocument } from './verification.js';
 
-import type { RunSnapshot, SupervisorAction, SupervisorDecision } from './types.js';
+import type { RunSnapshot, SupervisorAction, SupervisorDecision, SupervisorDecisionName } from './types.js';
 
 function sanitizeSegment(value: string | null | undefined, fallback: string): string {
   return (value ?? fallback).replace(/[^a-z0-9._-]+/giu, '-').replace(/^-+|-+$/gu, '') || fallback;
@@ -27,6 +28,25 @@ export function createSupervisorDecision(
   const activeMilestone = selectNextActionableMilestone(snapshot);
   const actions: SupervisorAction[] = [];
 
+  const buildDecision = (decision: SupervisorDecisionName, reason: string): SupervisorDecision => {
+    void selectSupervisorRuntimeProfile(snapshot, decision, activeMilestone);
+
+    return {
+      schemaVersion: 1,
+      kind: 'supervisor.decision',
+      generatedAt: new Date().toISOString(),
+      runId: snapshot.runId,
+      snapshotPath: snapshot.snapshotPath ?? null,
+      eventLogPath: snapshot.eventLogPath ?? null,
+      overallStatus: healthReport.overallStatus,
+      runStatus: snapshot.status,
+      activeMilestoneId: decision === 'closeout' ? null : activeMilestone?.id ?? null,
+      decision,
+      reason,
+      actions,
+    };
+  };
+
   if (snapshot.status === 'completed') {
     actions.push({
       id: 'disable-watchdog',
@@ -39,20 +59,7 @@ export function createSupervisorDecision(
       summary: 'The run is complete; disable the watchdog cadence and stop supervisory nudges.',
     });
 
-    return {
-      schemaVersion: 1,
-      kind: 'supervisor.decision',
-      generatedAt: new Date().toISOString(),
-      runId: snapshot.runId,
-      snapshotPath: snapshot.snapshotPath ?? null,
-      eventLogPath: snapshot.eventLogPath ?? null,
-      overallStatus: healthReport.overallStatus,
-      runStatus: snapshot.status,
-      activeMilestoneId: null,
-      decision: 'closeout',
-      reason: 'All milestones are completed; only run closeout remains.',
-      actions,
-    };
+    return buildDecision('closeout', 'All milestones are completed; only run closeout remains.');
   }
 
   if (snapshot.status === 'blocked' || (snapshot.status !== 'planned' && healthReport.recoveryRecommendation.action !== 'none')) {
@@ -67,20 +74,7 @@ export function createSupervisorDecision(
       summary: healthReport.recoveryRecommendation.reason,
     });
 
-    return {
-      schemaVersion: 1,
-      kind: 'supervisor.decision',
-      generatedAt: new Date().toISOString(),
-      runId: snapshot.runId,
-      snapshotPath: snapshot.snapshotPath ?? null,
-      eventLogPath: snapshot.eventLogPath ?? null,
-      overallStatus: healthReport.overallStatus,
-      runStatus: snapshot.status,
-      activeMilestoneId: activeMilestone?.id ?? null,
-      decision: 'recover',
-      reason: healthReport.recoveryRecommendation.reason,
-      actions,
-    };
+    return buildDecision('recover', healthReport.recoveryRecommendation.reason);
   }
 
   if (snapshot.status === 'verifying') {
@@ -95,20 +89,7 @@ export function createSupervisorDecision(
       summary: `Run verification for milestone ${activeMilestone?.id ?? 'unknown'} before completion.`,
     });
 
-    return {
-      schemaVersion: 1,
-      kind: 'supervisor.decision',
-      generatedAt: new Date().toISOString(),
-      runId: snapshot.runId,
-      snapshotPath: snapshot.snapshotPath ?? null,
-      eventLogPath: snapshot.eventLogPath ?? null,
-      overallStatus: healthReport.overallStatus,
-      runStatus: snapshot.status,
-      activeMilestoneId: activeMilestone?.id ?? null,
-      decision: 'verify',
-      reason: 'The active milestone is in verifying state and needs an explicit verification result.',
-      actions,
-    };
+    return buildDecision('verify', 'The active milestone is in verifying state and needs an explicit verification result.');
   }
 
   actions.push({
@@ -124,22 +105,12 @@ export function createSupervisorDecision(
       : `Continue milestone ${activeMilestone?.id ?? 'unknown'} without widening scope.`,
   });
 
-  return {
-    schemaVersion: 1,
-    kind: 'supervisor.decision',
-    generatedAt: new Date().toISOString(),
-    runId: snapshot.runId,
-    snapshotPath: snapshot.snapshotPath ?? null,
-    eventLogPath: snapshot.eventLogPath ?? null,
-    overallStatus: healthReport.overallStatus,
-    runStatus: snapshot.status,
-    activeMilestoneId: activeMilestone?.id ?? null,
-    decision: 'continue',
-    reason: snapshot.status === 'planned'
+  return buildDecision(
+    'continue',
+    snapshot.status === 'planned'
       ? 'The run has an actionable milestone and no active implementer progress yet.'
       : 'The active milestone remains healthy and should continue under the bounded contract.',
-    actions,
-  };
+  );
 }
 
 export function writeSupervisorBundle(

@@ -1,24 +1,32 @@
-Goal: replace the remaining manual supervisor/orchestrator glue with thin Laizy-native CLI wrappers that deterministically read durable run state and emit the next machine-readable action documents.
+# IMPLEMENTATION_PLAN.md
+
+Goal: allow the Laizy supervisor process to choose model, reasoning mode, and thinking effort depending on task scope, then emit those runtime choices as part of the bounded machine-readable next-action bundle.
 
 ## Execution rules
-- This plan is the authoritative execution queue for the supervisor-wrapper slice.
+- This plan is the authoritative execution queue for the runtime-profile slice.
 - Advance one highest-priority incomplete milestone at a time.
 - After each completed milestone: update this file, verify with `/usr/bin/node scripts/build-check.mjs`, commit exactly once, and push immediately.
-- Keep scope narrow and compatibility-safe; prefer wrappers around existing primitives over new orchestration subsystems.
-- The compiled CLI entrypoint is `dist/src/index.js`; operator docs should teach that path, not source files.
+- Keep scope narrow and compatibility-safe; prefer extending existing supervisor/openclaw primitives over introducing a separate orchestration subsystem.
+- The compiled CLI entrypoint is `dist/src/index.js`; the wrapper flow remains `start-run` once, then `supervisor-tick` for continuation.
 
-### [x] W3 - Add a deterministic supervisor tick wrapper
-- Added a top-level `supervisor-tick` CLI command that rebuilds durable run state from the snapshot, evaluates health, and emits one machine-readable supervisor decision bundle.
-- The bundle classifies the next deterministic action as continue, verify, recover, or closeout, then writes the corresponding bounded documents and OpenClaw adapters alongside a stable manifest.
-- Reused existing implementer, recovery, verification, and OpenClaw primitives instead of introducing a new orchestration subsystem; the wrapper is packaging and decision glue over the current compiled CLI flow.
-- Added explicit closeout guidance with a machine-readable watchdog disable cron adapter so operators no longer need to compose shutdown guidance by hand.
+### [x] R1 - Add scope-aware runtime profile selection in supervisor logic
+- Add explicit runtime profile types covering at least model, thinking effort, and reasoning mode.
+- Teach the supervisor layer to classify the current next action (`continue`, `recover`, `verify`, `closeout`) and active milestone scope into a bounded runtime profile.
+- Keep the first heuristic version simple and deterministic.
+- Default reasoning visibility conservatively for shared/group-safe operation.
 - Verification checkpoint: `/usr/bin/node scripts/build-check.mjs`
-- Discovery: the health model treats a freshly planned run as `rehand-off`, so the supervisor layer must special-case planned bootstrap continuation instead of blindly mapping every non-`none` recommendation to recovery.
-- Discovery: covering the wrapper in `build-check` needs state-specific assertions for continue, recover, verify, and closeout so decision drift is caught before operators see inconsistent next-action bundles.
+- Completed 2026-03-26: added explicit supervisor runtime-profile types plus deterministic action/scope classification with conservative hidden-reasoning defaults; verified via `/usr/bin/node scripts/build-check.mjs`.
 
-### [x] W4 - Refresh README for supervisor-driven continuation and closeout
-- Updated `README.md` so the primary operator flow is `start-run` once for bootstrap, then `supervisor-tick` for deterministic continuation, recovery handoff, verification, and closeout.
-- Documented the supervisor decision bundle as the source of truth for next-action selection, including the continue/recover/verify/closeout classifications and the emitted handoff/adapter artifacts.
-- Kept the lower-level CLI commands documented as building blocks while explicitly demoting them below the wrapper-driven path.
+### [ ] R2 - Thread runtime profiles through emitted Laizy/OpenClaw artifacts
+- Attach the selected runtime profile to the supervisor decision bundle.
+- Thread model/thinking into emitted OpenClaw spawn adapters where applicable.
+- Carry reasoning mode as an explicit machine-readable field in the emitted runtime/adaptor documents, even where execution remains wrapper-mediated.
+- Keep continue/recover/verify bundles explicit about which worker/runtime profile should be used next.
 - Verification checkpoint: `/usr/bin/node scripts/build-check.mjs`
-- Discovery: the README needed to explain not just the wrapper command itself, but the operator contract that supervisors should consume emitted manifests instead of reconstructing next steps in freeform chat.
+
+### [ ] R3 - Refresh README and verification coverage for runtime-profile-aware supervision
+- Update `README.md` to explain that `supervisor-tick` now chooses runtime profile as well as next action.
+- Document the intended operator contract around automatic model/thinking/reasoning selection and any conservative defaults.
+- Extend `scripts/build-check.mjs` to assert that the emitted bundles include the expected runtime profile data across representative supervisor decisions.
+- Record the final verification checkpoint and notable discoveries in this plan.
+- Verification checkpoint: `/usr/bin/node scripts/build-check.mjs`

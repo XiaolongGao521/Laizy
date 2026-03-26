@@ -37,6 +37,7 @@ run(process.execPath, ['--check', 'dist/src/core/contracts.js']);
 run(process.execPath, ['--check', 'dist/src/core/health.js']);
 run(process.execPath, ['--check', 'dist/src/core/recovery.js']);
 run(process.execPath, ['--check', 'dist/src/core/openclaw.js']);
+run(process.execPath, ['--check', 'dist/src/core/runtime-profile.js']);
 run(process.execPath, ['--check', 'dist/src/core/verification.js']);
 run(process.execPath, ['--check', 'dist/src/core/supervisor.js']);
 
@@ -48,6 +49,7 @@ const [
   recoveryModule,
   openClawModule,
   runStateModule,
+  runtimeProfileModule,
   verificationModule,
   supervisorModule,
 ] = await Promise.all([
@@ -58,6 +60,7 @@ const [
   importBuiltModule('dist/src/core/recovery.js'),
   importBuiltModule('dist/src/core/openclaw.js'),
   importBuiltModule('dist/src/core/run-state.js'),
+  importBuiltModule('dist/src/core/runtime-profile.js'),
   importBuiltModule('dist/src/core/verification.js'),
   importBuiltModule('dist/src/core/supervisor.js'),
 ]);
@@ -88,6 +91,7 @@ const {
   writeOpenClawAdapter,
 } = openClawModule;
 const { createRunState } = runStateModule;
+const { classifyMilestoneScope, selectSupervisorRuntimeProfile } = runtimeProfileModule;
 const {
   createReviewerOutput,
   createVerificationCommand,
@@ -221,6 +225,17 @@ if (!planHasIncompleteMilestones) {
 const continueDecision = createSupervisorDecision(initialized.snapshot);
 assert(continueDecision.kind === 'supervisor.decision', 'expected supervisor decision document kind');
 assert(continueDecision.decision === 'continue', 'expected a fresh planned run to continue into implementer work');
+const continueRuntimeProfile = selectSupervisorRuntimeProfile(initialized.snapshot, continueDecision.decision);
+assert(continueRuntimeProfile.reasoningMode === 'hidden', 'expected continue runtime profile to default to hidden reasoning');
+assert(continueRuntimeProfile.scope === 'core-runtime', 'expected runtime-profile classifier to treat the active runtime-profile milestone as core-runtime work');
+assert(continueRuntimeProfile.thinking === 'high', 'expected core-runtime continue work to request high thinking');
+assert(classifyMilestoneScope({
+  ...initialized.snapshot.milestones[0],
+  title: 'Update README for operators',
+  details: ['Document the supervised workflow'],
+}) === 'docs', 'expected classifier to detect docs scope');
+assert(selectSupervisorRuntimeProfile(initialized.snapshot, 'recover').thinking === 'high', 'expected recover runtime profile to stay high-thinking');
+assert(selectSupervisorRuntimeProfile(initialized.snapshot, 'closeout').model === 'openai-codex/gpt-5.4-mini', 'expected closeout runtime profile to use the smaller bounded model');
 
 const continueBundle = writeSupervisorBundle(path.join(tempDir, 'supervisor', 'continue'), initialized.snapshot);
 assert(continueBundle.documents.implementerContract, 'expected continue bundle to include an implementer contract');

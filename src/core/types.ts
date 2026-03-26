@@ -197,6 +197,19 @@ export type SupervisorAction = {
   summary: string;
 };
 
+export type SupervisorDecisionName = 'continue' | 'recover' | 'verify' | 'closeout';
+export type SupervisorScopeClassification = 'none' | 'docs' | 'verification' | 'core-runtime' | 'implementation';
+export type SupervisorRuntimeModel = 'openai-codex/gpt-5.4' | 'openai-codex/gpt-5.4-mini';
+export type SupervisorThinkingEffort = 'low' | 'medium' | 'high';
+export type SupervisorReasoningMode = 'off' | 'hidden' | 'visible';
+
+export type SupervisorRuntimeProfile = {
+  model: SupervisorRuntimeModel;
+  thinking: SupervisorThinkingEffort;
+  reasoningMode: SupervisorReasoningMode;
+  scope: SupervisorScopeClassification;
+};
+
 export type SupervisorDecision = {
   schemaVersion: number;
   kind: 'supervisor.decision';
@@ -207,7 +220,7 @@ export type SupervisorDecision = {
   overallStatus: string;
   runStatus: string;
   activeMilestoneId: string | null;
-  decision: string;
+  decision: SupervisorDecisionName;
   reason: string;
   actions: SupervisorAction[];
 };
