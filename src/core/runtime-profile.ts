@@ -27,7 +27,7 @@ export function classifyMilestoneScope(milestone: SnapshotMilestone | null): Sup
     return 'docs';
   }
 
-  if (/(runtime|supervisor|orchestration|worker|adapter|contract|event log|run state|health|recovery|core)/u.test(scopeText)) {
+  if (/(runtime|supervisor|orchestration|adapter|event log|run state|health|recovery|core)/u.test(scopeText)) {
     return 'core-runtime';
   }
 
@@ -101,7 +101,7 @@ export function selectSupervisorRuntimeProfile(
 
   return {
     model: 'openai-codex/gpt-5.4',
-    thinking: 'medium',
+    thinking: 'low',
     reasoningMode: 'hidden',
     scope,
   };

@@ -28,7 +28,7 @@ function importBuiltModule(relativePath) {
   return import(pathToFileURL(absolutePath).href);
 }
 
-run('/usr/bin/npx', ['tsc', '-p', 'tsconfig.json']);
+run('/usr/bin/env', ['bash', '-lc', 'rm -rf dist && /usr/bin/npx tsc -p tsconfig.json']);
 run(process.execPath, ['--check', 'dist/src/index.js']);
 run(process.execPath, ['--check', 'dist/src/core/plan.js']);
 run(process.execPath, ['--check', 'dist/src/core/run-state.js']);
@@ -37,11 +37,13 @@ run(process.execPath, ['--check', 'dist/src/core/contracts.js']);
 run(process.execPath, ['--check', 'dist/src/core/health.js']);
 run(process.execPath, ['--check', 'dist/src/core/recovery.js']);
 run(process.execPath, ['--check', 'dist/src/core/openclaw.js']);
+run(process.execPath, ['--check', 'dist/src/core/backends.js']);
 run(process.execPath, ['--check', 'dist/src/core/runtime-profile.js']);
 run(process.execPath, ['--check', 'dist/src/core/verification.js']);
 run(process.execPath, ['--check', 'dist/src/core/supervisor.js']);
 
 const [
+  backendsModule,
   contractsModule,
   eventsModule,
   healthModule,
@@ -53,6 +55,7 @@ const [
   verificationModule,
   supervisorModule,
 ] = await Promise.all([
+  importBuiltModule('dist/src/core/backends.js'),
   importBuiltModule('dist/src/core/contracts.js'),
   importBuiltModule('dist/src/core/events.js'),
   importBuiltModule('dist/src/core/health.js'),
@@ -65,6 +68,12 @@ const [
   importBuiltModule('dist/src/core/supervisor.js'),
 ]);
 
+const {
+  createClaudeCodeExecAdapter,
+  createCodexCliExecAdapter,
+  createLaizyWatchdogAdapter,
+  writeBackendAdapter,
+} = backendsModule;
 const {
   createImplementerContract,
   createPlannerIntent,
@@ -167,6 +176,29 @@ assert(plannerSpawnAdapter.payload.sessionLabel === 'laizy-planner', 'expected p
 assert(plannerSpawnAdapter.payload.promptDocument?.kind === 'planner.request', 'expected planner spawn adapter to embed the planner request');
 assert(plannerSpawnAdapter.runtimeProfile?.thinking === 'high', 'expected planner spawn adapter to request a stronger runtime profile');
 
+const codexImplementerExec = createCodexCliExecAdapter(initialized.snapshot, { worker: 'implementer' });
+assert(codexImplementerExec.kind === 'codex-cli.exec', 'expected codex backend adapter document kind');
+assert(codexImplementerExec.payload.command === 'codex', 'expected codex backend adapter to target the codex CLI');
+assert(codexImplementerExec.payload.args[0] === 'exec', 'expected codex backend adapter to use the exec entrypoint');
+assert(codexImplementerExec.payload.metadata.requestedThinking === 'low', 'expected codex backend adapter to carry runtime-profile metadata');
+
+const claudePlannerExec = createClaudeCodeExecAdapter(initialized.snapshot, { worker: 'planner' });
+assert(claudePlannerExec.kind === 'claude-code.exec', 'expected claude backend adapter document kind');
+assert(claudePlannerExec.payload.command === 'claude', 'expected claude backend adapter to target the claude CLI');
+assert(claudePlannerExec.payload.args.includes('--print'), 'expected claude backend adapter to use non-interactive print mode');
+assert(claudePlannerExec.payload.metadata.requestedThinking === 'high', 'expected claude planner adapter to carry a high-thinking runtime profile');
+
+const laizyWatchdogAdapter = createLaizyWatchdogAdapter(initialized.snapshot, {
+  outDir: path.join(tempDir, 'supervisor'),
+  intervalSeconds: 42,
+  stallThresholdMinutes: 9,
+  verificationCommand: '/usr/bin/node scripts/build-check.mjs',
+});
+assert(laizyWatchdogAdapter.kind === 'laizy.watchdog', 'expected local watchdog adapter document kind');
+assert(laizyWatchdogAdapter.payload.command === 'laizy', 'expected local watchdog adapter to target the laizy CLI');
+assert(laizyWatchdogAdapter.payload.args[0] === 'watchdog', 'expected local watchdog adapter to use the watchdog subcommand');
+assert(laizyWatchdogAdapter.payload.mode === 'ensure', 'expected local watchdog adapter to default to ensure mode');
+
 const sendAdapter = createSessionSendAdapter(initialized.snapshot, {
   worker: 'implementer',
   message: 'resume milestone execution',
@@ -218,9 +250,27 @@ assert(
   'expected bootstrap manifest to surface actionable plan state when work remains and completed plan state after full closeout',
 );
 assert(bootstrapManifest.documents.implementerSpawn, 'expected bootstrap manifest to include implementer spawn adapter path when the plan is not in needs-plan bootstrap mode');
+assert(bootstrapManifest.documents.laizyWatchdog, 'expected bootstrap manifest to include a local watchdog adapter path');
+assert(bootstrapManifest.documents.codexImplementerExec, 'expected bootstrap manifest to include a codex implementer adapter path');
+assert(bootstrapManifest.documents.claudeImplementerExec, 'expected bootstrap manifest to include a claude implementer adapter path');
 const bootstrapSpawnAdapter = JSON.parse(readFileSync(bootstrapManifest.documents.implementerSpawn, 'utf8'));
 assert(bootstrapSpawnAdapter.kind === 'openclaw.sessions_spawn', 'expected bootstrap bundle to include a machine-readable spawn adapter');
 assert(bootstrapSpawnAdapter.runtimeProfile?.thinking, 'expected bootstrap spawn adapter to include runtime-profile data');
+const bootstrapWatchdogAdapter = JSON.parse(readFileSync(bootstrapManifest.documents.laizyWatchdog, 'utf8'));
+assert(bootstrapWatchdogAdapter.kind === 'laizy.watchdog', 'expected bootstrap manifest to include a local watchdog adapter');
+assert(bootstrapWatchdogAdapter.payload.args[0] === 'watchdog', 'expected bootstrap local watchdog to use the watchdog subcommand');
+const watchdogCliResult = run(process.execPath, [
+  'dist/src/index.js',
+  'watchdog',
+  '--snapshot',
+  cliBootstrapSnapshotPath,
+  '--out-dir',
+  path.join(tempDir, 'watchdog-once'),
+  '--once',
+]);
+const watchdogCliOutput = JSON.parse(watchdogCliResult.stdout);
+assert(['continue', 'recover', 'verify', 'plan', 'replan', 'closeout'].includes(watchdogCliOutput.decision), 'expected watchdog CLI to emit a machine-readable supervisor decision');
+assert(typeof watchdogCliOutput.manifestPath === 'string', 'expected watchdog CLI to emit a supervisor manifest path');
 
 const supervisorCliResult = run(process.execPath, [
   'dist/src/index.js',
@@ -267,6 +317,9 @@ assert(selectSupervisorRuntimeProfile(initialized.snapshot, 'closeout').model ==
 
 const continueBundle = writeSupervisorBundle(path.join(tempDir, 'supervisor', 'continue'), initialized.snapshot);
 assert(continueBundle.documents.implementerContract, 'expected continue bundle to include an implementer contract');
+assert(continueBundle.documents.implementerSpawn, 'expected continue bundle to include an OpenClaw implementer spawn adapter');
+assert(continueBundle.documents.codexImplementerExec, 'expected continue bundle to include a codex implementer adapter');
+assert(continueBundle.documents.claudeImplementerExec, 'expected continue bundle to include a claude implementer adapter');
 const persistedContinueDecision = JSON.parse(readFileSync(continueBundle.decisionPath, 'utf8'));
 assert(persistedContinueDecision.decision === 'continue', 'expected persisted continue decision to remain machine-readable');
 
@@ -337,6 +390,8 @@ assert(replanDecision.decision === 'replan', 'expected blocked milestones to req
 const replanBundle = writeSupervisorBundle(path.join(tempDir, 'supervisor', 'replan'), blocked.snapshot);
 assert(replanBundle.documents.plannerRequest, 'expected replan bundle to include a planner request');
 assert(replanBundle.documents.plannerSpawn, 'expected replan bundle to include a planner spawn adapter');
+assert(replanBundle.documents.codexPlannerExec, 'expected replan bundle to include a codex planner adapter');
+assert(replanBundle.documents.claudePlannerExec, 'expected replan bundle to include a claude planner adapter');
 const persistedReplanSpawn = JSON.parse(readFileSync(replanBundle.documents.plannerSpawn, 'utf8'));
 assert(persistedReplanSpawn.payload.promptDocument?.requestedMode === 'replan', 'expected replan planner spawn to carry replan mode');
 
@@ -434,8 +489,11 @@ if (completed.snapshot.status === 'completed') {
   assert(closeoutDecision.decision === 'closeout', 'expected completed supervisor decision to request closeout');
   const closeoutBundle = writeSupervisorBundle(path.join(tempDir, 'supervisor', 'closeout'), completed.snapshot);
   assert(closeoutBundle.documents.disableWatchdog, 'expected closeout bundle to include a watchdog disable adapter');
+  assert(closeoutBundle.documents.disableLaizyWatchdog, 'expected closeout bundle to include a local watchdog disable adapter');
   const disableWatchdogAdapter = JSON.parse(readFileSync(closeoutBundle.documents.disableWatchdog, 'utf8'));
+  const disableLaizyWatchdogAdapter = JSON.parse(readFileSync(closeoutBundle.documents.disableLaizyWatchdog, 'utf8'));
   assert(disableWatchdogAdapter.payload.mode === 'disable', 'expected closeout adapter to disable the watchdog cron');
+  assert(disableLaizyWatchdogAdapter.payload.mode === 'disable', 'expected closeout adapter to disable the local watchdog');
 }
 
 const persisted = JSON.parse(readFileSync(snapshotPath, 'utf8'));
@@ -485,6 +543,9 @@ assert(emptyStartRunOutput.currentMilestoneId === null, 'expected empty plan boo
 const emptyBootstrapManifest = JSON.parse(readFileSync(emptyStartRunOutput.manifestPath, 'utf8'));
 assert(emptyBootstrapManifest.planState.status === 'needs-plan', 'expected empty plan bootstrap manifest to preserve needs-plan state');
 assert(emptyBootstrapManifest.documents.plannerRequest, 'expected empty plan bootstrap manifest to include a planner request document');
+assert(emptyBootstrapManifest.documents.openClawPlannerSpawn, 'expected empty plan bootstrap manifest to include an OpenClaw planner spawn adapter');
+assert(emptyBootstrapManifest.documents.codexPlannerExec, 'expected empty plan bootstrap manifest to include a codex planner adapter');
+assert(emptyBootstrapManifest.documents.claudePlannerExec, 'expected empty plan bootstrap manifest to include a claude planner adapter');
 assert(!emptyBootstrapManifest.documents.implementerSpawn, 'expected empty plan bootstrap manifest to avoid emittting implementer spawn instructions');
 const persistedPlannerRequest = JSON.parse(readFileSync(emptyBootstrapManifest.documents.plannerRequest, 'utf8'));
 assert(persistedPlannerRequest.kind === 'planner.request', 'expected persisted bootstrap planner request to remain machine-readable');

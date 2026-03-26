@@ -158,12 +158,18 @@ By default it creates:
 - `state/runs/demo-run.events.jsonl` — the append-only event log
 - `state/runs/demo-run.bootstrap/bootstrap-manifest.json` — machine-readable bundle manifest
 - `state/runs/demo-run.bootstrap/planner-intent.json` — current planner handoff
-- `state/runs/demo-run.bootstrap/openclaw-watchdog-cron.json` — watchdog cron adapter
+- `state/runs/demo-run.bootstrap/openclaw-watchdog-cron.json` — OpenClaw cron adapter for watchdog cadence
+- `state/runs/demo-run.bootstrap/laizy-watchdog.json` — backend-neutral/local watchdog command document (`laizy watchdog ...`)
 - if the plan already has actionable milestones:
   - `state/runs/demo-run.bootstrap/implementer-contract.json` — bounded implementer contract
-  - `state/runs/demo-run.bootstrap/openclaw-implementer-spawn.json` — initial worker spawn adapter
+  - `state/runs/demo-run.bootstrap/openclaw-implementer-spawn.json` — OpenClaw worker spawn adapter
+  - `state/runs/demo-run.bootstrap/codex-cli-implementer-exec.json` — Codex CLI execution adapter
+  - `state/runs/demo-run.bootstrap/claude-code-implementer-exec.json` — Claude Code execution adapter
 - if the plan is empty or otherwise lacks actionable milestones:
   - `state/runs/demo-run.bootstrap/planner-request.json` — machine-readable request for bounded planning
+  - `state/runs/demo-run.bootstrap/openclaw-planner-spawn.json` — OpenClaw planner spawn adapter
+  - `state/runs/demo-run.bootstrap/codex-cli-planner-exec.json` — Codex CLI planner adapter
+  - `state/runs/demo-run.bootstrap/claude-code-planner-exec.json` — Claude Code planner adapter
 
 The manifest is the stable document an external supervisor can consume to start the run without recomputing or manually stitching together the first-step artifacts.
 
@@ -204,13 +210,28 @@ Typical emitted artifacts include:
 
 - a stable supervisor manifest describing the decision
 - the decision-specific handoff document (`planner.request`, `implementer`, `recovery`, `verification`, or `closeout`)
-- any OpenClaw adapter payloads needed for that next step, including planner spawn adapters for `plan` / `replan`
+- backend-specific execution adapters for the same next step, including:
+  - OpenClaw spawn/cron adapters
+  - Codex CLI exec adapters
+  - Claude Code exec adapters
+  - local watchdog command documents for `laizy watchdog`
 - explicit runtime-profile data in the decision and next-step documents so downstream tooling can see the intended `model`, `thinking`, and `reasoningMode`
 - closeout-specific watchdog disable guidance when the plan is complete
 
 The important contract is that the supervisor bundle becomes the source of truth for the next action. A chat-based watchdog or operator should read the manifest and execute the emitted bounded document, not improvise the next step from memory.
 
-For planner-driven runs specifically, operators should consume `planner.request` plus the emitted planner spawn adapter rather than asking a chat model to refresh the plan freehand. That keeps planning/replanning inside the same durable, machine-readable supervision loop as implementation and recovery.
+For planner-driven runs specifically, operators should consume `planner.request` plus the emitted planner adapter for the backend they are using rather than asking a chat model to refresh the plan freehand. That keeps planning/replanning inside the same durable, machine-readable supervision loop as implementation and recovery.
+
+### Local watchdog loop
+
+```bash
+node dist/src/index.js watchdog \
+  --snapshot state/runs/demo-run.json \
+  --out-dir state/runs/demo-run.supervisor \
+  --interval-seconds 300
+```
+
+Use `watchdog` when you want Laizy itself to own the periodic supervisor cadence instead of relying on OpenClaw cron. It repeatedly rebuilds state, runs `supervisor-tick` logic, prints the emitted decision, and exits automatically on `closeout`.
 
 ### Low-level building blocks
 

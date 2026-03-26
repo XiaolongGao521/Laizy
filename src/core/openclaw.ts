@@ -81,13 +81,19 @@ function createAdapterEnvelope({
 
 export function createSessionSpawnAdapter(
   snapshot: RunSnapshot,
-  options: { worker?: WorkerRole; milestoneId?: string; runtime?: string; healthOptions?: { now?: string; stallThresholdMinutes?: number } } = {},
+  options: {
+    worker?: WorkerRole;
+    milestoneId?: string;
+    runtime?: string;
+    healthOptions?: { now?: string; stallThresholdMinutes?: number };
+    runtimeProfile?: ReturnType<typeof selectSupervisorRuntimeProfile>;
+  } = {},
 ) {
   const worker = resolveWorker(snapshot, options.worker ?? 'implementer');
-  const milestone = resolveMilestone(snapshot, options.milestoneId ?? null);
+  const milestone = resolveMilestone(snapshot, options.milestoneId);
   const runtime = options.runtime ?? 'subagent';
   const decision = inferDecisionName(snapshot, worker.role);
-  const runtimeProfile = selectSupervisorRuntimeProfile(snapshot, decision, milestone);
+  const runtimeProfile = options.runtimeProfile ?? selectSupervisorRuntimeProfile(snapshot, decision, milestone);
   const contract = worker.role === 'implementer'
     ? createImplementerContract(snapshot, milestone)
     : null;

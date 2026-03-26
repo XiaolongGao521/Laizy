@@ -1,6 +1,12 @@
 import path from 'node:path';
 
 import { createImplementerContract, createPlannerRequest, selectNextActionableMilestone, writeContractDocument } from './contracts.js';
+import {
+  createClaudeCodeExecAdapter,
+  createCodexCliExecAdapter,
+  createLaizyWatchdogAdapter,
+  writeBackendAdapter,
+} from './backends.js';
 import { evaluateRunHealth } from './health.js';
 import { createCronAdapter, createSessionSpawnAdapter, writeOpenClawAdapter } from './openclaw.js';
 import { createRecoveryPlan, writeRecoveryPlan } from './recovery.js';
@@ -171,10 +177,20 @@ export function writeSupervisorBundle(
     const plannerRequestPath = writeContractDocument(path.join(resolvedOutputDir, `${baseName}.planner-request.json`), plannerRequest);
     const plannerSpawnPath = writeOpenClawAdapter(
       path.join(resolvedOutputDir, `${baseName}.planner-spawn.json`),
-      createSessionSpawnAdapter(snapshot, { worker: 'planner' }),
+      createSessionSpawnAdapter(snapshot, { worker: 'planner', runtimeProfile: decision.runtimeProfile }),
+    );
+    const codexPlannerExecPath = writeBackendAdapter(
+      path.join(resolvedOutputDir, `${baseName}.codex-cli-planner-exec.json`),
+      createCodexCliExecAdapter(snapshot, { worker: 'planner', runtimeProfile: decision.runtimeProfile }),
+    );
+    const claudePlannerExecPath = writeBackendAdapter(
+      path.join(resolvedOutputDir, `${baseName}.claude-code-planner-exec.json`),
+      createClaudeCodeExecAdapter(snapshot, { worker: 'planner', runtimeProfile: decision.runtimeProfile }),
     );
     documents.plannerRequest = plannerRequestPath;
     documents.plannerSpawn = plannerSpawnPath;
+    documents.codexPlannerExec = codexPlannerExecPath;
+    documents.claudePlannerExec = claudePlannerExecPath;
     decision.actions = decision.actions.map((action) => ({
       ...action,
       documentPath: action.kind === 'planner.request' ? plannerRequestPath : action.documentPath,
@@ -186,10 +202,20 @@ export function writeSupervisorBundle(
     const contractPath = writeContractDocument(path.join(resolvedOutputDir, `${baseName}.implementer-contract.json`), contract);
     const spawnPath = writeOpenClawAdapter(
       path.join(resolvedOutputDir, `${baseName}.implementer-spawn.json`),
-      createSessionSpawnAdapter(snapshot, { worker: 'implementer' }),
+      createSessionSpawnAdapter(snapshot, { worker: 'implementer', runtimeProfile: decision.runtimeProfile }),
+    );
+    const codexExecPath = writeBackendAdapter(
+      path.join(resolvedOutputDir, `${baseName}.codex-cli-implementer-exec.json`),
+      createCodexCliExecAdapter(snapshot, { worker: 'implementer', runtimeProfile: decision.runtimeProfile }),
+    );
+    const claudeExecPath = writeBackendAdapter(
+      path.join(resolvedOutputDir, `${baseName}.claude-code-implementer-exec.json`),
+      createClaudeCodeExecAdapter(snapshot, { worker: 'implementer', runtimeProfile: decision.runtimeProfile }),
     );
     documents.implementerContract = contractPath;
     documents.implementerSpawn = spawnPath;
+    documents.codexImplementerExec = codexExecPath;
+    documents.claudeImplementerExec = claudeExecPath;
     decision.actions = decision.actions.map((action) => ({
       ...action,
       documentPath: action.kind === 'implementer.contract' ? contractPath : action.documentPath,
@@ -207,10 +233,29 @@ export function writeSupervisorBundle(
       createSessionSpawnAdapter(snapshot, {
         worker: 'recovery',
         healthOptions: { stallThresholdMinutes: options.stallThresholdMinutes },
+        runtimeProfile: decision.runtimeProfile,
+      }),
+    );
+    const codexRecoveryExecPath = writeBackendAdapter(
+      path.join(resolvedOutputDir, `${baseName}.codex-cli-recovery-exec.json`),
+      createCodexCliExecAdapter(snapshot, {
+        worker: 'recovery',
+        healthOptions: { now: options.now, stallThresholdMinutes: options.stallThresholdMinutes },
+        runtimeProfile: decision.runtimeProfile,
+      }),
+    );
+    const claudeRecoveryExecPath = writeBackendAdapter(
+      path.join(resolvedOutputDir, `${baseName}.claude-code-recovery-exec.json`),
+      createClaudeCodeExecAdapter(snapshot, {
+        worker: 'recovery',
+        healthOptions: { now: options.now, stallThresholdMinutes: options.stallThresholdMinutes },
+        runtimeProfile: decision.runtimeProfile,
       }),
     );
     documents.recoveryPlan = recoveryPlanPath;
     documents.recoverySpawn = recoverySpawnPath;
+    documents.codexRecoveryExec = codexRecoveryExecPath;
+    documents.claudeRecoveryExec = claudeRecoveryExecPath;
     decision.actions = decision.actions.map((action) => ({
       ...action,
       documentPath: action.kind === 'recovery.plan' ? recoveryPlanPath : action.documentPath,
@@ -225,7 +270,17 @@ export function writeSupervisorBundle(
       path.join(resolvedOutputDir, `${baseName}.verification-command.json`),
       verificationCommand,
     );
+    const codexVerifierExecPath = writeBackendAdapter(
+      path.join(resolvedOutputDir, `${baseName}.codex-cli-verifier-exec.json`),
+      createCodexCliExecAdapter(snapshot, { worker: 'verifier', runtimeProfile: decision.runtimeProfile }),
+    );
+    const claudeVerifierExecPath = writeBackendAdapter(
+      path.join(resolvedOutputDir, `${baseName}.claude-code-verifier-exec.json`),
+      createClaudeCodeExecAdapter(snapshot, { worker: 'verifier', runtimeProfile: decision.runtimeProfile }),
+    );
     documents.verificationCommand = verificationCommandPath;
+    documents.codexVerifierExec = codexVerifierExecPath;
+    documents.claudeVerifierExec = claudeVerifierExecPath;
     decision.actions = decision.actions.map((action) => ({
       ...action,
       documentPath: action.kind === 'verification.command' ? verificationCommandPath : action.documentPath,
@@ -237,7 +292,17 @@ export function writeSupervisorBundle(
       path.join(resolvedOutputDir, `${sanitizeSegment(snapshot.runId, 'run')}.watchdog-disable.json`),
       createCronAdapter(snapshot, { worker: 'watchdog', mode: 'disable' }),
     );
+    const disableLaizyWatchdogPath = writeBackendAdapter(
+      path.join(resolvedOutputDir, `${sanitizeSegment(snapshot.runId, 'run')}.laizy-watchdog-disable.json`),
+      createLaizyWatchdogAdapter(snapshot, {
+        outDir: resolvedOutputDir,
+        stallThresholdMinutes: options.stallThresholdMinutes,
+        verificationCommand: options.verificationCommand,
+        mode: 'disable',
+      }),
+    );
     documents.disableWatchdog = disableWatchdogPath;
+    documents.disableLaizyWatchdog = disableLaizyWatchdogPath;
     decision.actions = decision.actions.map((action) => ({
       ...action,
       documentPath: action.kind === 'openclaw.cron' ? disableWatchdogPath : action.documentPath,

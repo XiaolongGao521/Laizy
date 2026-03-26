@@ -36,11 +36,11 @@
   ],
   "scripts": {
     "build": "/usr/bin/node scripts/build-check.mjs",
-    "compile": "/usr/bin/npx tsc -p tsconfig.json",
+    "compile": "rm -rf dist && /usr/bin/npx tsc -p tsconfig.json",
     "typecheck": "/usr/bin/npx tsc -p tsconfig.json --noEmit",
-    "prepare": "/usr/bin/npx tsc -p tsconfig.json",
-    "prepack": "/usr/bin/npx tsc -p tsconfig.json",
-    "smoke:init": "/usr/bin/npx tsc -p tsconfig.json && node dist/src/index.js init-run --goal \"smoke test\" --plan examples/demo-implementation-plan.md --out /tmp/laizy-smoke-run.json",
+    "prepare": "rm -rf dist && /usr/bin/npx tsc -p tsconfig.json",
+    "prepack": "rm -rf dist && /usr/bin/npx tsc -p tsconfig.json",
+    "smoke:init": "rm -rf dist && /usr/bin/npx tsc -p tsconfig.json && node dist/src/index.js init-run --goal \"smoke test\" --plan examples/demo-implementation-plan.md --out /tmp/laizy-smoke-run.json",
     "ralph:plan": "/root/.openclaw/workspace/ralph-loop.sh --repo \"$PWD\" --mode planning",
     "ralph:build": "/root/.openclaw/workspace/ralph-loop.sh --repo \"$PWD\" --mode build"
   },

@@ -39,7 +39,14 @@ import {
   createSessionSpawnAdapter,
   writeOpenClawAdapter,
 } from './core/openclaw.js';
+import {
+  createClaudeCodeExecAdapter,
+  createCodexCliExecAdapter,
+  createLaizyWatchdogAdapter,
+  writeBackendAdapter,
+} from './core/backends.js';
 import { createRunState } from './core/run-state.js';
+import { selectSupervisorRuntimeProfile } from './core/runtime-profile.js';
 import {
   createReviewerOutput,
   createVerificationCommand,
@@ -56,6 +63,7 @@ Usage:
   node dist/src/index.js summary --plan <path>
   node dist/src/index.js init-run --goal <text> --plan <path> --out <snapshot-path> [--run-id <id>]
   node dist/src/index.js start-run --goal <text> --plan <path> --out <snapshot-path> [--run-id <id>] [--bundle-dir <dir>] [--runtime <value>] [--schedule <cron>] [--prompt <text>]
+  node dist/src/index.js watchdog --snapshot <snapshot-path> [--out-dir <dir>] [--interval-seconds <n>] [--stall-threshold-minutes <n>] [--verification-command <text>] [--once]
   node dist/src/index.js transition --snapshot <snapshot-path> --milestone <id> --status <status> [--note <text>]
   node dist/src/index.js snapshot --snapshot <snapshot-path>
   node dist/src/index.js select-milestone --snapshot <snapshot-path>
@@ -71,6 +79,9 @@ Usage:
   node dist/src/index.js emit-openclaw-send --snapshot <snapshot-path> [--worker <implementer|recovery|watchdog|planner|verifier>] --message <text> [--mode <append|replace>] [--out <path>]
   node dist/src/index.js emit-openclaw-history --snapshot <snapshot-path> [--worker <implementer|recovery|watchdog|planner|verifier>] [--limit <n>] [--since <iso>] [--include-tool-calls] [--out <path>]
   node dist/src/index.js emit-openclaw-cron --snapshot <snapshot-path> [--worker <watchdog|planner|recovery>] [--schedule <cron>] [--prompt <text>] [--job-label <label>] [--out <path>]
+  node dist/src/index.js emit-codex-cli-exec --snapshot <snapshot-path> [--worker <implementer|recovery|watchdog|planner|verifier>] [--milestone <id>] [--out <path>]
+  node dist/src/index.js emit-claude-code-exec --snapshot <snapshot-path> [--worker <implementer|recovery|watchdog|planner|verifier>] [--milestone <id>] [--out <path>]
+  node dist/src/index.js emit-laizy-watchdog --snapshot <snapshot-path> [--out-dir <dir>] [--interval-seconds <n>] [--stall-threshold-minutes <n>] [--verification-command <text>] [--mode <ensure|disable>] [--out <path>]
   node dist/src/index.js emit-verification-command --snapshot <snapshot-path> [--milestone <id>] [--command <text>] [--stage <value>] [--out <path>]
   node dist/src/index.js emit-reviewer-output --snapshot <snapshot-path> [--milestone <id>] [--verdict <approved|changes-requested|needs-review>] [--summary <text>] [--next-action <value>] [--finding <text> ...] [--out <path>]
   node dist/src/index.js record-verification-result --snapshot <snapshot-path> --milestone <id> --command <text> --status <pending|passed|failed> [--output-path <path>] [--summary <text>] [--reviewer-output <path>]
@@ -116,6 +127,10 @@ function defaultRunId() {
   return `run-${new Date().toISOString().replace(/[:.]/g, '-').toLowerCase()}`;
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function defaultBootstrapDir(snapshotPath: string): string {
   const resolvedSnapshotPath = path.resolve(snapshotPath);
   return resolvedSnapshotPath.endsWith('.json')
@@ -130,7 +145,7 @@ function writeJsonDocument(outputPath: string, document: object): string {
   return resolvedOutputPath;
 }
 
-function main() {
+async function main() {
   const { command, options } = parseArgs(process.argv.slice(2));
 
   if (!command || command === 'help' || options.help) {
@@ -205,25 +220,64 @@ function main() {
       prompt: typeof options.prompt === 'string' ? options.prompt : undefined,
     });
     const watchdogCronPath = writeOpenClawAdapter(path.join(bundleDir, 'openclaw-watchdog-cron.json'), watchdogCron);
+    const laizyWatchdog = createLaizyWatchdogAdapter(rebuilt.snapshot, {
+      outDir: typeof options['supervisor-dir'] === 'string'
+        ? options['supervisor-dir']
+        : path.join(path.dirname(rebuilt.snapshotPath), `${path.basename(rebuilt.snapshotPath, '.json')}.supervisor`),
+      intervalSeconds: typeof options['interval-seconds'] === 'string' ? Number(options['interval-seconds']) : undefined,
+      stallThresholdMinutes: typeof options['stall-threshold-minutes'] === 'string' ? Number(options['stall-threshold-minutes']) : undefined,
+      verificationCommand: typeof options['verification-command'] === 'string' ? options['verification-command'] : undefined,
+      mode: 'ensure',
+    });
+    const laizyWatchdogPath = writeBackendAdapter(path.join(bundleDir, 'laizy-watchdog.json'), laizyWatchdog);
     const documents: Record<string, string> = {
       plannerIntent: plannerIntentPath,
       watchdogCron: watchdogCronPath,
+      laizyWatchdog: laizyWatchdogPath,
     };
 
     if (rebuilt.snapshot.planState.status === 'needs-plan') {
+      const plannerRuntimeProfile = selectSupervisorRuntimeProfile(rebuilt.snapshot, 'plan');
       const plannerRequest = createPlannerRequest(rebuilt.snapshot);
       const plannerRequestPath = writeContractDocument(path.join(bundleDir, 'planner-request.json'), plannerRequest);
+      const openClawPlannerSpawnPath = writeOpenClawAdapter(
+        path.join(bundleDir, 'openclaw-planner-spawn.json'),
+        createSessionSpawnAdapter(rebuilt.snapshot, { worker: 'planner', runtimeProfile: plannerRuntimeProfile }),
+      );
+      const codexPlannerExecPath = writeBackendAdapter(
+        path.join(bundleDir, 'codex-cli-planner-exec.json'),
+        createCodexCliExecAdapter(rebuilt.snapshot, { worker: 'planner', runtimeProfile: plannerRuntimeProfile }),
+      );
+      const claudePlannerExecPath = writeBackendAdapter(
+        path.join(bundleDir, 'claude-code-planner-exec.json'),
+        createClaudeCodeExecAdapter(rebuilt.snapshot, { worker: 'planner', runtimeProfile: plannerRuntimeProfile }),
+      );
       documents.plannerRequest = plannerRequestPath;
+      documents.openClawPlannerSpawn = openClawPlannerSpawnPath;
+      documents.codexPlannerExec = codexPlannerExecPath;
+      documents.claudePlannerExec = claudePlannerExecPath;
     } else {
+      const implementerRuntimeProfile = selectSupervisorRuntimeProfile(rebuilt.snapshot, 'continue');
       const implementerContract = createImplementerContract(rebuilt.snapshot);
       const implementerSpawn = createSessionSpawnAdapter(rebuilt.snapshot, {
         worker: 'implementer',
         runtime: typeof options.runtime === 'string' ? options.runtime : undefined,
+        runtimeProfile: implementerRuntimeProfile,
       });
       const implementerContractPath = writeContractDocument(path.join(bundleDir, 'implementer-contract.json'), implementerContract);
       const implementerSpawnPath = writeOpenClawAdapter(path.join(bundleDir, 'openclaw-implementer-spawn.json'), implementerSpawn);
+      const codexImplementerExecPath = writeBackendAdapter(
+        path.join(bundleDir, 'codex-cli-implementer-exec.json'),
+        createCodexCliExecAdapter(rebuilt.snapshot, { worker: 'implementer', runtimeProfile: implementerRuntimeProfile }),
+      );
+      const claudeImplementerExecPath = writeBackendAdapter(
+        path.join(bundleDir, 'claude-code-implementer-exec.json'),
+        createClaudeCodeExecAdapter(rebuilt.snapshot, { worker: 'implementer', runtimeProfile: implementerRuntimeProfile }),
+      );
       documents.implementerContract = implementerContractPath;
       documents.implementerSpawn = implementerSpawnPath;
+      documents.codexImplementerExec = codexImplementerExecPath;
+      documents.claudeImplementerExec = claudeImplementerExecPath;
     }
 
     const manifestPath = writeJsonDocument(path.join(bundleDir, 'bootstrap-manifest.json'), {
@@ -257,6 +311,46 @@ function main() {
       ),
     );
     return;
+  }
+
+  if (command === 'watchdog') {
+    const snapshotPath = requireOption(options, 'snapshot');
+    const intervalSeconds = typeof options['interval-seconds'] === 'string'
+      ? Number(options['interval-seconds'])
+      : 300;
+
+    if (Number.isNaN(intervalSeconds) || intervalSeconds <= 0) {
+      throw new Error('Expected --interval-seconds to be a positive number');
+    }
+
+    do {
+      const rebuilt = rebuildSnapshot(snapshotPath);
+      const outputDir = typeof options['out-dir'] === 'string'
+        ? path.resolve(options['out-dir'])
+        : path.join(path.dirname(rebuilt.snapshotPath), `${path.basename(rebuilt.snapshotPath, '.json')}.supervisor`);
+      const bundle = writeSupervisorBundle(outputDir, rebuilt.snapshot, {
+        stallThresholdMinutes: typeof options['stall-threshold-minutes'] === 'string'
+          ? Number(options['stall-threshold-minutes'])
+          : undefined,
+        verificationCommand: typeof options['verification-command'] === 'string'
+          ? options['verification-command']
+          : undefined,
+      });
+
+      console.log(JSON.stringify({
+        decision: bundle.decision.decision,
+        reason: bundle.decision.reason,
+        manifestPath: bundle.manifestPath,
+        decisionPath: bundle.decisionPath,
+        actions: bundle.decision.actions,
+      }, null, 2));
+
+      if (options.once || bundle.decision.decision === 'closeout') {
+        return;
+      }
+
+      await sleep(intervalSeconds * 1000);
+    } while (true);
   }
 
   if (command === 'transition') {
@@ -559,6 +653,63 @@ function main() {
     return;
   }
 
+  if (command === 'emit-codex-cli-exec') {
+    const snapshotPath = requireOption(options, 'snapshot');
+    const rebuilt = rebuildSnapshot(snapshotPath);
+    const document = createCodexCliExecAdapter(rebuilt.snapshot, {
+      worker: typeof options.worker === 'string' ? options.worker as WorkerRole : undefined,
+      milestoneId: typeof options.milestone === 'string' ? options.milestone : undefined,
+    });
+
+    if (typeof options.out === 'string') {
+      const outputPath = writeBackendAdapter(options.out, document);
+      console.log(JSON.stringify({ outputPath, kind: document.kind, worker: document.worker.label }, null, 2));
+      return;
+    }
+
+    console.log(JSON.stringify(document, null, 2));
+    return;
+  }
+
+  if (command === 'emit-claude-code-exec') {
+    const snapshotPath = requireOption(options, 'snapshot');
+    const rebuilt = rebuildSnapshot(snapshotPath);
+    const document = createClaudeCodeExecAdapter(rebuilt.snapshot, {
+      worker: typeof options.worker === 'string' ? options.worker as WorkerRole : undefined,
+      milestoneId: typeof options.milestone === 'string' ? options.milestone : undefined,
+    });
+
+    if (typeof options.out === 'string') {
+      const outputPath = writeBackendAdapter(options.out, document);
+      console.log(JSON.stringify({ outputPath, kind: document.kind, worker: document.worker.label }, null, 2));
+      return;
+    }
+
+    console.log(JSON.stringify(document, null, 2));
+    return;
+  }
+
+  if (command === 'emit-laizy-watchdog') {
+    const snapshotPath = requireOption(options, 'snapshot');
+    const rebuilt = rebuildSnapshot(snapshotPath);
+    const document = createLaizyWatchdogAdapter(rebuilt.snapshot, {
+      outDir: typeof options['out-dir'] === 'string' ? options['out-dir'] : undefined,
+      intervalSeconds: typeof options['interval-seconds'] === 'string' ? Number(options['interval-seconds']) : undefined,
+      stallThresholdMinutes: typeof options['stall-threshold-minutes'] === 'string' ? Number(options['stall-threshold-minutes']) : undefined,
+      verificationCommand: typeof options['verification-command'] === 'string' ? options['verification-command'] : undefined,
+      mode: typeof options.mode === 'string' ? options.mode as 'ensure' | 'disable' : undefined,
+    });
+
+    if (typeof options.out === 'string') {
+      const outputPath = writeBackendAdapter(options.out, document);
+      console.log(JSON.stringify({ outputPath, kind: document.kind, worker: document.worker.label }, null, 2));
+      return;
+    }
+
+    console.log(JSON.stringify(document, null, 2));
+    return;
+  }
+
   if (command === 'emit-verification-command') {
     const snapshotPath = requireOption(options, 'snapshot');
     const rebuilt = rebuildSnapshot(snapshotPath);
@@ -632,9 +783,7 @@ function main() {
   throw new Error(`Unknown command: ${command}`);
 }
 
-try {
-  main();
-} catch (error) {
+main().catch((error) => {
   console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 1;
-}
+});
