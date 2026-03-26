@@ -2,7 +2,7 @@
   "name": "laizy",
   "version": "0.1.0",
   "description": "Open-source orchestration layer for Claude Code, Codex, OpenClaw, and other coding agents.",
-  "license": "Apache-2.0",
+  "license": "MIT",
   "type": "module",
   "bin": {
     "laizy": "dist/src/index.js"
@@ -38,6 +38,7 @@
     "build": "/usr/bin/node scripts/build-check.mjs",
     "compile": "/usr/bin/npx tsc -p tsconfig.json",
     "typecheck": "/usr/bin/npx tsc -p tsconfig.json --noEmit",
+    "prepare": "/usr/bin/npx tsc -p tsconfig.json",
     "prepack": "/usr/bin/npx tsc -p tsconfig.json",
     "smoke:init": "/usr/bin/npx tsc -p tsconfig.json && node dist/src/index.js init-run --goal \"smoke test\" --plan examples/demo-implementation-plan.md --out /tmp/laizy-smoke-run.json",
     "ralph:plan": "/root/.openclaw/workspace/ralph-loop.sh --repo \"$PWD\" --mode planning",

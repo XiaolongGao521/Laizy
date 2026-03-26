@@ -24,6 +24,26 @@ Or use it without a global install:
 npx laizy --help
 ```
 
+## OpenClaw skill
+
+This repo now also ships an OpenClaw/AgentSkills-compatible skill source at:
+
+```text
+skills/laizy/
+```
+
+That skill is designed for people already using Claude Code, Codex, OpenClaw, and similar coding agents. It teaches OpenClaw how to drive Laizy's `start-run` / `supervisor-tick` workflow and includes installer metadata so the skill can install the Laizy CLI.
+
+Package the skill locally with OpenClaw's `package_skill.py` helper, or publish it later with ClawHub:
+
+```bash
+clawhub publish ./skills/laizy --slug laizy --name "Laizy" --version 0.1.0 --changelog "Initial ClawHub release"
+```
+
+Current installer note:
+- the skill is configured to install the Laizy CLI from GitHub via npm (`github:XiaolongGao521/Laizy`)
+- that avoids requiring an npm registry release before the ClawHub skill itself can be published
+
 ## Why Laizy
 
 - **Bring your own agents** — use Claude Code, Codex, OpenClaw, and similar tools instead of being locked into one hosted platform.
@@ -400,7 +420,7 @@ Before publishing, run both readiness checks from a clean working tree:
 
 ## License
 
-Laizy is licensed under Apache-2.0. See `LICENSE` for the full text.
+Laizy is licensed under MIT. See `LICENSE` for the full text.
 
 ## Near-term roadmap
 
