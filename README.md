@@ -1,6 +1,14 @@
 # Laizy
 
-Laizy is a repo-native autonomous software factory built around the exact Ralph-loop workflow already proven in SillyAvatar:
+Laizy is a repo-native autonomous software delivery engine built around the exact Ralph-loop workflow already proven in SillyAvatar.
+
+The npm package exposes a single CLI entrypoint:
+
+```bash
+laizy
+```
+
+That command resolves to the compiled runtime at `dist/src/index.js`.
 
 - plan first
 - implement one milestone at a time
@@ -44,7 +52,7 @@ Laizy is not "one big autonomous prompt." It is a deterministic delivery loop wi
 
 ## CLI
 
-The compiled CLI entrypoint is:
+The published package ships the `laizy` binary, which resolves to the compiled CLI entrypoint:
 
 ```bash
 node dist/src/index.js
@@ -331,6 +339,10 @@ These scripts mirror the SillyAvatar process and target this repository explicit
 npm run ralph:plan
 npm run ralph:build
 ```
+
+## License
+
+Laizy is licensed under Apache-2.0. See `LICENSE` for the full text.
 
 ## Near-term roadmap
 

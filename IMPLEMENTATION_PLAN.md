@@ -10,11 +10,11 @@ Goal: make Laizy publishable on npm and add Apache-2.0 licensing, using the Laiz
 - The compiled CLI entrypoint is `dist/src/index.js`; use `start-run` and `supervisor-tick` to drive the run.
 - Treat `npm pack --dry-run` plus `/usr/bin/node scripts/build-check.mjs` as the packaging-readiness gates for this slice.
 
-### [ ] P1 - Add npm-ready package metadata and Apache-2.0 licensing
-- Update `package.json` from repo-private development metadata to publish-ready npm metadata, including `license`, repository links, package entrypoints, and a minimal publish surface definition.
-- Add an Apache-2.0 `LICENSE` file and align package/docs wording with the final package identity and supported CLI entrypoint.
-- Keep the published artifact small and explicit: only compiled runtime assets and required package docs should ship, not repo-only planning/state files.
-- Verification checkpoint: `/usr/bin/node scripts/build-check.mjs`
+### [x] P1 - Add npm-ready package metadata and Apache-2.0 licensing
+- Added publish-ready `package.json` metadata: Apache-2.0 license, repository/homepage/bugs links, explicit CLI/package entrypoints, and an explicit minimal `files` publish surface.
+- Added the Apache-2.0 `LICENSE` file and aligned `README.md` wording around the published `laizy` CLI entrypoint and package identity.
+- Limited the intended published artifact to compiled runtime assets plus required package docs (`dist/`, `README.md`, `LICENSE`).
+- Verification checkpoint passed: `/usr/bin/node scripts/build-check.mjs`
 
 ### [ ] P2 - Make the package packable from a clean checkout
 - Wire the package scripts and packaging controls so `npm pack --dry-run` can succeed from a fresh clone without depending on committed `dist/` output.

@@ -1,9 +1,29 @@
 {
   "name": "laizy",
   "version": "0.1.0",
-  "private": true,
   "description": "Repo-native autonomous software delivery orchestration built around the Ralph-loop workflow.",
+  "license": "Apache-2.0",
   "type": "module",
+  "bin": {
+    "laizy": "dist/src/index.js"
+  },
+  "main": "dist/src/index.js",
+  "exports": {
+    ".": "./dist/src/index.js"
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/XiaolongGao521/Laizy.git"
+  },
+  "homepage": "https://github.com/XiaolongGao521/Laizy#readme",
+  "bugs": {
+    "url": "https://github.com/XiaolongGao521/Laizy/issues"
+  },
   "scripts": {
     "build": "/usr/bin/node scripts/build-check.mjs",
     "compile": "/usr/bin/npx tsc -p tsconfig.json",
