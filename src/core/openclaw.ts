@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { createImplementerContract } from './contracts.js';
+import { createImplementerContract, createPlannerRequest } from './contracts.js';
 import { evaluateRunHealth } from './health.js';
 import { createRecoveryPlan } from './recovery.js';
 import { selectSupervisorRuntimeProfile } from './runtime-profile.js';
@@ -35,7 +35,11 @@ function resolveMilestone(snapshot: RunSnapshot, milestoneId: string | null = sn
   return snapshot.milestones.find((milestone) => milestone.id === milestoneId) ?? null;
 }
 
-function inferDecisionName(workerRole: WorkerRole): SupervisorDecisionName {
+function inferDecisionName(snapshot: RunSnapshot, workerRole: WorkerRole): SupervisorDecisionName {
+  if (workerRole === 'planner') {
+    return snapshot.planState.status === 'needs-plan' ? 'plan' : 'replan';
+  }
+
   if (workerRole === 'recovery') {
     return 'recover';
   }
@@ -82,10 +86,18 @@ export function createSessionSpawnAdapter(
   const worker = resolveWorker(snapshot, options.worker ?? 'implementer');
   const milestone = resolveMilestone(snapshot, options.milestoneId ?? null);
   const runtime = options.runtime ?? 'subagent';
-  const decision = inferDecisionName(worker.role);
+  const decision = inferDecisionName(snapshot, worker.role);
   const runtimeProfile = selectSupervisorRuntimeProfile(snapshot, decision, milestone);
   const contract = worker.role === 'implementer'
     ? createImplementerContract(snapshot, milestone)
+    : null;
+  const plannerRequest = worker.role === 'planner'
+    ? createPlannerRequest(snapshot, {
+        requestedMode: decision === 'replan' ? 'replan' : 'plan',
+        triggerReason: decision === 'replan'
+          ? 'The current run state requires bounded plan repair before implementation can continue.'
+          : snapshot.planState.reason,
+      })
     : null;
   const recoveryPlan = worker.role === 'recovery'
     ? createRecoveryPlan(snapshot, evaluateRunHealth(snapshot, options.healthOptions ?? {}))
@@ -102,7 +114,7 @@ export function createSessionSpawnAdapter(
       runtime,
       cwd: snapshot.repoPath,
       milestoneId: milestone?.id ?? null,
-      promptDocument: contract ?? recoveryPlan,
+      promptDocument: contract ?? plannerRequest ?? recoveryPlan,
       runtimeProfile,
       metadata: {
         stableWorkerLabel: true,

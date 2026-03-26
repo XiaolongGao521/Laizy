@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-import { createImplementerContract, selectNextActionableMilestone, writeContractDocument } from './contracts.js';
+import { createImplementerContract, createPlannerRequest, selectNextActionableMilestone, writeContractDocument } from './contracts.js';
 import { evaluateRunHealth } from './health.js';
 import { createCronAdapter, createSessionSpawnAdapter, writeOpenClawAdapter } from './openclaw.js';
 import { createRecoveryPlan, writeRecoveryPlan } from './recovery.js';
@@ -51,6 +51,22 @@ export function createSupervisorDecision(
     };
   };
 
+  if (snapshot.planState.status === 'needs-plan') {
+    actions.push({
+      id: 'planner-bootstrap',
+      kind: 'planner.request',
+      title: 'Request bounded planning before implementation starts',
+      worker: snapshot.workers.planner,
+      requiresExternalExecution: true,
+      documentPath: null,
+      documentKind: 'planner.request',
+      summary: snapshot.planState.reason,
+      runtimeProfile: null,
+    });
+
+    return buildDecision('plan', snapshot.planState.reason);
+  }
+
   if (snapshot.status === 'completed') {
     actions.push({
       id: 'disable-watchdog',
@@ -65,6 +81,22 @@ export function createSupervisorDecision(
     });
 
     return buildDecision('closeout', 'All milestones are completed; only run closeout remains.');
+  }
+
+  if (snapshot.status === 'blocked' && activeMilestone?.status === 'blocked') {
+    actions.push({
+      id: 'planner-repair',
+      kind: 'planner.request',
+      title: 'Request bounded replanning for the blocked milestone',
+      worker: snapshot.workers.planner,
+      requiresExternalExecution: true,
+      documentPath: null,
+      documentKind: 'planner.request',
+      summary: activeMilestone.lastNote ?? 'The current milestone is blocked and requires plan repair.',
+      runtimeProfile: null,
+    });
+
+    return buildDecision('replan', activeMilestone.lastNote ?? 'The current milestone is blocked and requires plan repair.');
   }
 
   if (snapshot.status === 'blocked' || (snapshot.status !== 'planned' && healthReport.recoveryRecommendation.action !== 'none')) {
@@ -130,6 +162,24 @@ export function writeSupervisorBundle(
   const decision = createSupervisorDecision(snapshot, options);
   const baseName = bundleBaseName(snapshot);
   const documents: Record<string, string> = {};
+
+  if (decision.decision === 'plan' || decision.decision === 'replan') {
+    const plannerRequest = createPlannerRequest(snapshot, {
+      requestedMode: decision.decision === 'replan' ? 'replan' : 'plan',
+      triggerReason: decision.reason,
+    });
+    const plannerRequestPath = writeContractDocument(path.join(resolvedOutputDir, `${baseName}.planner-request.json`), plannerRequest);
+    const plannerSpawnPath = writeOpenClawAdapter(
+      path.join(resolvedOutputDir, `${baseName}.planner-spawn.json`),
+      createSessionSpawnAdapter(snapshot, { worker: 'planner' }),
+    );
+    documents.plannerRequest = plannerRequestPath;
+    documents.plannerSpawn = plannerSpawnPath;
+    decision.actions = decision.actions.map((action) => ({
+      ...action,
+      documentPath: action.kind === 'planner.request' ? plannerRequestPath : action.documentPath,
+    }));
+  }
 
   if (decision.decision === 'continue') {
     const contract = createImplementerContract(snapshot);

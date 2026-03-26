@@ -16,12 +16,13 @@ Goal: add a dedicated planner subagent path so Laizy can invoke planning/replann
 - Verification checkpoint: `/usr/bin/node scripts/build-check.mjs`
 - Completed: added `planner.request`, preserved `needs-plan` bootstrap state for empty plans, and verified with `/usr/bin/node scripts/build-check.mjs`.
 
-### [ ] P2 - Add `plan` / `replan` supervisor decisions and planner spawn adapters
+### [x] P2 - Add `plan` / `replan` supervisor decisions and planner spawn adapters
 - Extend `supervisor-tick` to emit `plan` or `replan` decisions when the run lacks actionable milestones or when the current run state clearly requires plan repair.
 - Emit bounded planner bundles containing `planner.request` plus OpenClaw planner spawn adapters.
 - Thread runtime-profile selection into planner decisions so planning can use a stronger default profile than ordinary implementation when appropriate.
 - Keep existing `continue` / `recover` / `verify` / `closeout` behavior stable.
 - Verification checkpoint: `/usr/bin/node scripts/build-check.mjs`
+- Completed: supervisor now emits `plan`/`replan` decisions with planner bundles and planner spawn adapters, and planner runtime selection is high-thinking by default.
 
 ### [ ] P3 - Refresh README and verification coverage for planner-driven runs
 - Update `README.md` to explain when `supervisor-tick` emits `plan` / `replan` and how a dedicated planner worker fits into the wrapper-driven operator flow.

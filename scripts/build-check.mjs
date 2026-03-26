@@ -162,6 +162,11 @@ assert(spawnAdapter.payload.promptDocument?.kind === 'implementer.contract', 'ex
 assert(spawnAdapter.runtimeProfile?.model === 'openai-codex/gpt-5.4', 'expected spawn adapter to carry a runtime profile');
 assert(spawnAdapter.payload.runtimeProfile?.reasoningMode === 'hidden', 'expected spawn payload to carry conservative reasoning mode');
 
+const plannerSpawnAdapter = createSessionSpawnAdapter(initialized.snapshot, { worker: 'planner' });
+assert(plannerSpawnAdapter.payload.sessionLabel === 'laizy-planner', 'expected planner spawn adapter to use stable label');
+assert(plannerSpawnAdapter.payload.promptDocument?.kind === 'planner.request', 'expected planner spawn adapter to embed the planner request');
+assert(plannerSpawnAdapter.runtimeProfile?.thinking === 'high', 'expected planner spawn adapter to request a stronger runtime profile');
+
 const sendAdapter = createSessionSendAdapter(initialized.snapshot, {
   worker: 'implementer',
   message: 'resume milestone execution',
@@ -252,6 +257,8 @@ assert(classifyMilestoneScope({
   title: 'Update README for operators',
   details: ['Document the supervised workflow'],
 }) === 'docs', 'expected classifier to detect docs scope');
+assert(selectSupervisorRuntimeProfile(initialized.snapshot, 'plan').thinking === 'high', 'expected plan runtime profile to stay high-thinking');
+assert(selectSupervisorRuntimeProfile(initialized.snapshot, 'replan').thinking === 'high', 'expected replan runtime profile to stay high-thinking');
 assert(selectSupervisorRuntimeProfile(initialized.snapshot, 'recover').thinking === 'high', 'expected recover runtime profile to stay high-thinking');
 assert(selectSupervisorRuntimeProfile(initialized.snapshot, 'closeout').model === 'openai-codex/gpt-5.4-mini', 'expected closeout runtime profile to use the smaller bounded model');
 
@@ -316,6 +323,26 @@ assert(persistedRecoverySpawn.runtimeProfile?.thinking === 'high', 'expected rec
 const recoveryPlanPath = writeRecoveryPlan(path.join(tempDir, 'recovery', 'plan.json'), recoveryPlan);
 const persistedRecoveryPlan = JSON.parse(readFileSync(recoveryPlanPath, 'utf8'));
 assert(persistedRecoveryPlan.action === 'restart-implementer', 'expected persisted recovery plan to remain machine-readable');
+
+const blocked = transitionMilestone(snapshotPath, {
+  milestoneId: targetMilestoneId,
+  status: 'blocked',
+  note: 'need plan repair before continuing',
+});
+const replanDecision = createSupervisorDecision(blocked.snapshot);
+assert(replanDecision.decision === 'replan', 'expected blocked milestones to request bounded replanning');
+const replanBundle = writeSupervisorBundle(path.join(tempDir, 'supervisor', 'replan'), blocked.snapshot);
+assert(replanBundle.documents.plannerRequest, 'expected replan bundle to include a planner request');
+assert(replanBundle.documents.plannerSpawn, 'expected replan bundle to include a planner spawn adapter');
+const persistedReplanSpawn = JSON.parse(readFileSync(replanBundle.documents.plannerSpawn, 'utf8'));
+assert(persistedReplanSpawn.payload.promptDocument?.requestedMode === 'replan', 'expected replan planner spawn to carry replan mode');
+
+const replanned = transitionMilestone(snapshotPath, {
+  milestoneId: targetMilestoneId,
+  status: 'implementing',
+  note: 'resumed after replanning decision coverage',
+});
+assert(replanned.snapshot.status === 'implementing', 'expected milestone to resume implementing after replan coverage');
 
 const recoveryRecord = recordRecoveryAction(snapshotPath, {
   action: recoveryPlan.action,
@@ -397,7 +424,7 @@ const expectedRunStatus = expectedRemainingMilestoneId ? 'planned' : 'completed'
 
 assert(completed.snapshot.currentMilestoneId === expectedRemainingMilestoneId, 'expected completed milestone to advance current pointer to the next incomplete milestone');
 assert(completed.snapshot.status === expectedRunStatus, 'expected run status to reflect whether incomplete milestones remain');
-assert(completed.snapshot.eventCount === 7, 'expected initialization, recovery, heartbeat, verification, and milestone transitions in event log');
+assert(completed.snapshot.eventCount === 9, 'expected initialization, recovery, heartbeat, verification, and milestone transitions in event log');
 
 if (completed.snapshot.status === 'completed') {
   const closeoutDecision = createSupervisorDecision(completed.snapshot);
@@ -415,7 +442,7 @@ assert(persisted.recovery.length === 1, 'expected persisted snapshot to retain r
 assert(persisted.verification.length === 1, 'expected persisted snapshot to retain verification history');
 
 const events = loadRunEvents(eventLogPathForSnapshot(snapshotPath));
-assert(events.length === 7, 'expected event log to contain seven events');
+assert(events.length === 9, 'expected event log to contain nine events');
 
 const emptyPlanPath = path.join(tempDir, 'EMPTY_IMPLEMENTATION_PLAN.md');
 writeFileSync(emptyPlanPath, '# Empty plan for bootstrap verification\n', 'utf8');
@@ -431,6 +458,11 @@ assert(emptyRunState.planState.status === 'needs-plan', 'expected empty plans to
 const emptyPlannerRequest = createPlannerRequest(emptyRunState);
 assert(emptyPlannerRequest.requestedMode === 'plan', 'expected empty plans to request planning mode');
 assert(emptyPlannerRequest.currentPlanState.actionableMilestoneId === null, 'expected empty plans to have no actionable milestone id');
+const emptyPlanDecision = createSupervisorDecision(emptyRunState);
+assert(emptyPlanDecision.decision === 'plan', 'expected empty plans to drive a planner decision instead of closeout');
+const emptyPlanBundle = writeSupervisorBundle(path.join(tempDir, 'supervisor', 'plan-needed'), emptyRunState);
+assert(emptyPlanBundle.documents.plannerRequest, 'expected plan-needed bundles to include a planner request');
+assert(emptyPlanBundle.documents.plannerSpawn, 'expected plan-needed bundles to include a planner spawn adapter');
 
 const emptySnapshotPath = path.join(tempDir, 'empty-run.json');
 const emptyStartRunResult = run(process.execPath, [

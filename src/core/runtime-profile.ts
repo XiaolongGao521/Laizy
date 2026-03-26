@@ -54,6 +54,15 @@ export function selectSupervisorRuntimeProfile(
     };
   }
 
+  if (decision === 'plan' || decision === 'replan') {
+    return {
+      model: 'openai-codex/gpt-5.4',
+      thinking: 'high',
+      reasoningMode: 'hidden',
+      scope,
+    };
+  }
+
   if (decision === 'recover') {
     return {
       model: 'openai-codex/gpt-5.4',

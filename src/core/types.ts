@@ -226,7 +226,7 @@ export type SupervisorAction = {
   runtimeProfile: SupervisorRuntimeProfile | null;
 };
 
-export type SupervisorDecisionName = 'continue' | 'recover' | 'verify' | 'closeout';
+export type SupervisorDecisionName = 'plan' | 'replan' | 'continue' | 'recover' | 'verify' | 'closeout';
 export type SupervisorScopeClassification = 'none' | 'docs' | 'verification' | 'core-runtime' | 'implementation';
 export type SupervisorRuntimeModel = 'openai-codex/gpt-5.4' | 'openai-codex/gpt-5.4-mini';
 export type SupervisorThinkingEffort = 'low' | 'medium' | 'high';

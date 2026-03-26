@@ -28,7 +28,10 @@ export function selectNextActionableMilestone(snapshot: RunSnapshot): SnapshotMi
   return snapshot.milestones.find((milestone) => milestone.status !== 'completed') ?? null;
 }
 
-export function createPlannerRequest(snapshot: RunSnapshot): PlannerRequest {
+export function createPlannerRequest(
+  snapshot: RunSnapshot,
+  options: { requestedMode?: 'plan' | 'replan'; triggerReason?: string } = {},
+): PlannerRequest {
   return {
     schemaVersion: 1,
     kind: 'planner.request',
@@ -39,8 +42,8 @@ export function createPlannerRequest(snapshot: RunSnapshot): PlannerRequest {
     planPath: snapshot.planPath,
     worker: snapshot.workers.planner,
     targetWorker: snapshot.workers.implementer,
-    requestedMode: snapshot.planState.status === 'completed' ? 'replan' : 'plan',
-    triggerReason: snapshot.planState.reason,
+    requestedMode: options.requestedMode ?? (snapshot.planState.status === 'completed' ? 'replan' : 'plan'),
+    triggerReason: options.triggerReason ?? snapshot.planState.reason,
     currentPlanState: {
       ...clone(snapshot.planState),
       actionableMilestoneId: snapshot.currentMilestoneId ?? null,
