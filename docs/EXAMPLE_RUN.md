@@ -43,6 +43,7 @@ The decision now includes event-derived state so restart/resume is easier to aud
 - `eventDerivedState.activeMilestone` captures the current milestone status, last update time, and last note
 - `continuation.mode` explains whether the operator should start, continue, resume-after-rebuild, verify, recover, or close out
 - `continuation.recommendedDocumentKind` points to the next durable document to open instead of relying on chat memory
+- the emitted contract remains bounded to one milestone, so restart/resume does not silently broaden the work slice
 
 ## 3. Implementer receives the bounded milestone
 
@@ -101,6 +102,8 @@ node dist/src/index.js supervisor-tick \
 
 Recovery should either restart, re-handoff, or escalate the current milestone. It should not widen scope.
 
+That restart-safe path is intentionally artifact-first: rebuild from the event log, inspect the new supervisor bundle, then reopen the recommended durable document instead of relying on prior chat context.
+
 The `snapshot` rebuild step is the restart-safe handoff point. After rebuilding from `example-run.events.jsonl`, run `supervisor-tick` again and inspect the new bundle:
 
 - if `continuation.mode` is `resume-after-rebuild`, reopen the emitted implementer contract and continue the same milestone
@@ -142,6 +145,8 @@ node dist/src/index.js record-verification-result \
 ```
 
 Only after the passed verification result is recorded should the milestone move to `completed`.
+
+The repository build-check reinforces this example by asserting the docs and runtime flows keep describing the same restart-safe supervisor/recovery behavior.
 
 ## 8. Milestone closeout
 

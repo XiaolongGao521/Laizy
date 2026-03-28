@@ -399,6 +399,14 @@ assert(laizySkillSource.includes('laizy start-run'), 'expected shipped skill gui
 const readmeSource = readFileSync('README.md', 'utf8');
 assert(readmeSource.includes('laizy check-backends'), 'expected README to document the operator-facing backend validation command');
 assert(readmeSource.includes('--backend-config'), 'expected README to document backend configuration overrides');
+const architectureDocSource = readFileSync('docs/ARCHITECTURE.md', 'utf8');
+assert(architectureDocSource.includes('resume-after-rebuild'), 'expected architecture docs to describe restart-safe resume-after-rebuild decisions');
+assert(architectureDocSource.includes('recover-before-continuing'), 'expected architecture docs to describe bounded recover-before-continuing decisions');
+assert(architectureDocSource.includes('verification-gated completion'), 'expected architecture docs to describe verification-gated completion');
+const exampleRunDocSource = readFileSync('docs/EXAMPLE_RUN.md', 'utf8');
+assert(exampleRunDocSource.includes('continuation.recommendedDocumentKind'), 'expected example run docs to point operators at the next durable document');
+assert(exampleRunDocSource.includes('restart-safe path is intentionally artifact-first'), 'expected example run docs to describe artifact-first restart-safe recovery');
+assert(exampleRunDocSource.includes('Only after the passed verification result is recorded should the milestone move to `completed`.'), 'expected example run docs to keep verification-gated completion explicit');
 assert(bootstrapManifest.documents.implementerSpawn, 'expected bootstrap manifest to include implementer spawn adapter path when the plan is not in needs-plan bootstrap mode');
 assert(bootstrapManifest.documents.laizyWatchdog, 'expected bootstrap manifest to include a local watchdog adapter path');
 assert(bootstrapManifest.documents.watchdogBackendCheck, 'expected bootstrap manifest to include a watchdog backend health-check document');

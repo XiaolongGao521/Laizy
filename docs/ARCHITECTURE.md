@@ -76,9 +76,10 @@ The main control loop is:
 
 1. bootstrap once with `start-run`
 2. continue with `supervisor-tick`
-3. execute the emitted next action
+3. execute the emitted next action from the emitted supervisor bundle
 4. update state through transitions, heartbeats, recovery records, and verification results
-5. repeat until `closeout`
+5. rebuild from the event log when a worker or operator resumes after interruption
+6. repeat until `closeout`
 
 The supervisor decision space is intentionally narrow:
 
@@ -108,6 +109,13 @@ Current contract types include:
 - `supervisor.decision`
 
 These documents keep the next action explicit and limited in scope.
+
+The Stage 3 hardening pass makes the supervisor bundle itself part of the audit trail:
+
+- the decision document carries event-derived restart/resume context
+- continuation metadata points operators to the next durable document to open
+- recovery plans stay bounded to the active milestone instead of broad repo guidance
+- verification remains an explicit gate before a milestone can move to `completed`
 
 ### Backend adapter documents
 
@@ -147,6 +155,12 @@ The runtime can:
 
 That keeps stalled work inside the same durable control loop as normal progress.
 
+In the hardened Stage 3 flow, recovery is deliberately restart-safe and audit-friendly:
+
+- a snapshot can be rebuilt from the append-only event log before the next supervisor tick
+- the next bundle explains whether the operator should `resume-after-rebuild` or `recover-before-continuing`
+- the emitted recovery artifact stays tied to the current milestone so recovery cannot silently widen scope
+
 ## Runtime profile selection
 
 Supervisor decisions also carry a bounded runtime profile:
@@ -182,5 +196,7 @@ At a high level, the source tree is organized like this:
 The important design choice is restraint.
 
 Laizy does not attempt to directly "do the work" itself. It coordinates narrow slices of work, records what happened, and insists on verification before completion. That makes the system easier to resume, easier to audit, and harder to accidentally widen.
+
+The build-check script reinforces that stance by validating both runtime behavior and the operator-facing docs that describe restart-safe supervision, bounded recovery, and verification-gated completion.
 
 That is the architecture the current repository actually implements.
