@@ -60,6 +60,54 @@ const RUNTIME_CAPABILITIES = {
   },
 } satisfies Record<'codex-cli' | 'claude-code', RuntimeCapabilityMap>;
 
+function createRuntimeProfileSummary(runtimeProfile: SupervisorRuntimeProfile): string {
+  return `Use runtime profile model=${runtimeProfile.model}, thinking=${runtimeProfile.thinking}, reasoningMode=${runtimeProfile.reasoningMode}, scope=${runtimeProfile.scope} when the backend supports it.`;
+}
+
+function createCliOperatorGuidance(
+  backend: 'codex-cli' | 'claude-code',
+  worker: BackendWorker,
+  runtimeProfile: SupervisorRuntimeProfile,
+) {
+  const runtimeProfileSummary = createRuntimeProfileSummary(runtimeProfile);
+  const transportSummary = backend === 'codex-cli'
+    ? 'Codex CLI runs as a one-shot exec handoff and should be launched with PTY enabled.'
+    : 'Claude Code runs as a one-shot print handoff and should be launched without PTY.';
+  const commandExample = backend === 'codex-cli'
+    ? `codex exec --full-auto "<contract for ${worker.label}>"`
+    : `claude --permission-mode bypassPermissions --print "<contract for ${worker.label}>"`;
+
+  return {
+    runtimeProfileSummary,
+    transportSummary,
+    loopSummary: 'Keep Laizy as the control plane: start-run once, then supervisor-tick to emit the next bounded action from durable repo state.',
+    watchdogSummary: 'Use local `laizy watchdog` for cadence-driven inspection and recovery nudges; do not treat Codex CLI or Claude Code as the watchdog runtime.',
+    examples: [
+      'OpenClaw workers: prefer subagent/runtime-backed sessions for planner, implementer, recovery, and verifier handoffs.',
+      'Codex CLI workers: use a PTY-backed one-shot `codex exec --full-auto` invocation for the emitted contract.',
+      'Claude Code workers: use a non-PTY one-shot `claude --permission-mode bypassPermissions --print` invocation for the emitted contract.',
+      'Local watchdog: run `laizy watchdog` on a cadence against the same snapshot/out-dir instead of inventing a chat-only loop.',
+    ],
+    commandExample,
+  };
+}
+
+function createWatchdogOperatorGuidance(runtimeProfile: SupervisorRuntimeProfile, resolvedOutDir: string, intervalSeconds: number) {
+  return {
+    runtimeProfileSummary: createRuntimeProfileSummary(runtimeProfile),
+    transportSummary: 'The watchdog runs locally via `laizy watchdog`; it is the cadence runtime, not a chat worker or CLI coding backend.',
+    loopSummary: 'Keep Laizy as the control plane: start-run once, then supervisor-tick to emit the next bounded action from durable repo state.',
+    watchdogSummary: `Run the watchdog against the same snapshot and supervisor out-dir every ${intervalSeconds} seconds so it can inspect progress without widening scope.`,
+    examples: [
+      'OpenClaw workers: prefer subagent/runtime-backed sessions for planner, implementer, recovery, and verifier handoffs.',
+      'Codex CLI workers: use a PTY-backed one-shot `codex exec --full-auto` invocation for the emitted contract.',
+      'Claude Code workers: use a non-PTY one-shot `claude --permission-mode bypassPermissions --print` invocation for the emitted contract.',
+      `Local watchdog: run ` + '`laizy watchdog --snapshot <snapshot> --out-dir ' + `${resolvedOutDir}` + ' --interval-seconds ' + `${intervalSeconds}` + '` on the same durable run state.',
+    ],
+    commandExample: `laizy watchdog --snapshot <snapshot> --out-dir ${resolvedOutDir} --interval-seconds ${intervalSeconds}`,
+  };
+}
+
 function resolveWorker(snapshot: RunSnapshot, workerRole: WorkerRole): BackendWorker {
   if (!VALID_BACKEND_WORKERS.has(workerRole)) {
     throw new Error(`Unsupported worker role for the backend adapter layer: ${workerRole}`);
@@ -227,6 +275,7 @@ export function createCodexCliExecAdapter(
       configuredBackend: backendConfiguration,
       backendCheck,
       requestedRuntimeProfile: runtimeProfile,
+      operatorGuidance: createCliOperatorGuidance('codex-cli', worker, runtimeProfile),
       metadata: {
         stableWorkerLabel: true,
         repoPath: snapshot.repoPath,
@@ -278,6 +327,7 @@ export function createClaudeCodeExecAdapter(
       configuredBackend: backendConfiguration,
       backendCheck,
       requestedRuntimeProfile: runtimeProfile,
+      operatorGuidance: createCliOperatorGuidance('claude-code', worker, runtimeProfile),
       metadata: {
         stableWorkerLabel: true,
         repoPath: snapshot.repoPath,
@@ -309,6 +359,7 @@ export function createLaizyWatchdogAdapter(
   const intervalSeconds = Number(options.intervalSeconds ?? 300);
   const backendConfiguration = resolveBackendConfiguration(snapshot).watchdog;
   const backendCheck = options.backendCheck ?? createBackendCheckResult(snapshot, 'watchdog');
+  const runtimeProfile = selectSupervisorRuntimeProfile(snapshot, 'continue', resolveMilestone(snapshot));
 
   return {
     schemaVersion: 1,
@@ -323,6 +374,7 @@ export function createLaizyWatchdogAdapter(
       role: 'watchdog',
       label: snapshot.workers.watchdog,
     },
+    runtimeProfile,
     payload: {
       adapter: 'laizy.watchdog',
       mode: options.mode ?? 'ensure',
@@ -344,6 +396,8 @@ export function createLaizyWatchdogAdapter(
       ],
       configuredBackend: backendConfiguration,
       backendCheck,
+      requestedRuntimeProfile: runtimeProfile,
+      operatorGuidance: createWatchdogOperatorGuidance(runtimeProfile, resolvedOutDir, intervalSeconds),
       metadata: {
         stableWorkerLabel: true,
         cadence: 'watchdog',

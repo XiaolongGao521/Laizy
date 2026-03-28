@@ -98,6 +98,28 @@ function createBackendPreflightSummary(backendCheck: BackendCheckResultDocument)
   };
 }
 
+function createRuntimeProfileSummary(runtimeProfile: ReturnType<typeof selectSupervisorRuntimeProfile>): string {
+  return `Use runtime profile model=${runtimeProfile.model}, thinking=${runtimeProfile.thinking}, reasoningMode=${runtimeProfile.reasoningMode}, scope=${runtimeProfile.scope} when the runtime supports it.`;
+}
+
+function createOpenClawOperatorGuidance(
+  runtimeProfile: ReturnType<typeof selectSupervisorRuntimeProfile>,
+  workerLabel: string,
+) {
+  return {
+    runtimeProfileSummary: createRuntimeProfileSummary(runtimeProfile),
+    transportSummary: 'OpenClaw handoffs should use runtime-backed sessions, typically subagent, so the emitted contract stays separate from durable run state.',
+    loopSummary: 'Keep Laizy as the control plane: start-run once, then supervisor-tick to emit the next bounded action from durable repo state.',
+    watchdogSummary: 'Use local `laizy watchdog` for cadence-driven inspection and recovery nudges; do not turn the watchdog into another chat worker.',
+    examples: [
+      `OpenClaw workers: spawn ${workerLabel} with runtime=subagent when available and pass the emitted contract as the bounded handoff.`,
+      'Codex CLI workers: use a PTY-backed one-shot `codex exec --full-auto` invocation for the emitted contract.',
+      'Claude Code workers: use a non-PTY one-shot `claude --permission-mode bypassPermissions --print` invocation for the emitted contract.',
+      'Local watchdog: run `laizy watchdog` on a cadence against the same snapshot/out-dir instead of inventing a chat-only loop.',
+    ],
+  };
+}
+
 export function createSessionSpawnAdapter(
   snapshot: RunSnapshot,
   options: {
@@ -147,6 +169,7 @@ export function createSessionSpawnAdapter(
       backendCheck,
       backendPreflight: createBackendPreflightSummary(backendCheck),
       runtimeProfile,
+      operatorGuidance: createOpenClawOperatorGuidance(runtimeProfile, worker.label),
       metadata: {
         stableWorkerLabel: true,
         repoPath: snapshot.repoPath,
@@ -220,6 +243,7 @@ export function createCronAdapter(
   const schedule = options.schedule ?? '*/5 * * * *';
   const backendConfiguration = resolveBackendConfiguration(snapshot)[worker.role];
   const backendCheck = options.backendCheck ?? createBackendCheckResult(snapshot, worker.role);
+  const runtimeProfile = selectSupervisorRuntimeProfile(snapshot, worker.role === 'planner' ? 'plan' : 'recover', resolveMilestone(snapshot));
   const prompt = options.prompt
     ?? `Inspect ${snapshot.workers.implementer} for repo-native control-loop milestone progress or stalls in ${path.basename(snapshot.repoPath)}.`;
 
@@ -227,6 +251,7 @@ export function createCronAdapter(
     operation: 'cron',
     snapshot,
     worker,
+    runtimeProfile,
     payload: {
       adapter: 'cron',
       mode,
@@ -237,6 +262,8 @@ export function createCronAdapter(
       configuredBackend: backendConfiguration,
       backendCheck,
       backendPreflight: createBackendPreflightSummary(backendCheck),
+      requestedRuntimeProfile: runtimeProfile,
+      operatorGuidance: createOpenClawOperatorGuidance(runtimeProfile, worker.label),
       metadata: {
         stableWorkerLabel: true,
         cadence: 'watchdog',

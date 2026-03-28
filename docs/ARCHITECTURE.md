@@ -128,6 +128,16 @@ The core run model is kept separate from transport/runtime details. The reposito
 
 That separation matters: backend-specific execution instructions are generated from durable state instead of being embedded into the state schema itself.
 
+The operator-facing guidance carried by those adapters should stay aligned:
+
+- **Laizy owns the loop** — bootstrap with `start-run`, then use `supervisor-tick` as the source of truth for every later bounded action.
+- **OpenClaw owns session-style handoff** — prefer runtime-backed sessions such as `subagent` for planner/implementer/recovery/verifier workers.
+- **Codex CLI owns PTY one-shot execution** — run the emitted contract through `codex exec --full-auto ...` with PTY enabled.
+- **Claude Code owns non-PTY one-shot execution** — run the emitted contract through `claude --permission-mode bypassPermissions --print ...`.
+- **`laizy watchdog` owns cadence** — it should inspect the same snapshot and supervisor out-dir instead of acting like another chat-bound coding worker.
+
+Adapter payloads may carry operator guidance and runtime-profile summaries, but those remain thin transport hints generated from durable state rather than new run-state schema.
+
 ## Verification gate
 
 Verification is not an afterthought in the current architecture.
@@ -171,6 +181,12 @@ Supervisor decisions also carry a bounded runtime profile:
 - coarse scope classification
 
 This keeps downstream worker spawning deterministic and lets the control loop distinguish, for example, docs work from core-runtime work without widening the contract.
+
+The runtime profile is advisory across adapters, not a transport rewrite:
+
+- OpenClaw payloads should surface the selected profile next to the session handoff.
+- Codex CLI and Claude Code payloads should preserve the same profile as requested operator intent, even when the backend cannot enforce every knob directly.
+- Local watchdog payloads should carry the same profile summary so operator docs and emitted artifacts describe one consistent loop.
 
 ## File-level map of the current implementation
 

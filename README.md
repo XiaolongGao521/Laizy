@@ -91,7 +91,17 @@ Today the repo can emit adapter documents for:
 - Claude Code execution
 - local `laizy watchdog` cadence
 
+Across all of those adapters, the operator guidance should stay the same:
+
+- **Laizy remains the control plane** — run `start-run` once, then use `supervisor-tick` to emit the next bounded action from durable repo state.
+- **OpenClaw is the session runtime** — prefer `runtime=subagent` or another runtime-backed session for planner, implementer, recovery, and verifier handoffs.
+- **Codex CLI is a one-shot worker runtime** — use a PTY-backed `codex exec --full-auto ...` invocation for the emitted contract.
+- **Claude Code is a one-shot worker runtime** — use `claude --permission-mode bypassPermissions --print ...` without PTY for the emitted contract.
+- **`laizy watchdog` is the cadence runtime** — run it locally against the same snapshot/out-dir instead of inventing a chat-only watchdog loop.
+
 Backend preflight artifacts are also emitted so worker handoff can fail early when a configured runtime is unavailable.
+
+These adapter documents are intentionally thin and replaceable: they restate durable control-loop intent for a specific runtime without pushing backend-specific concerns into the run snapshot schema.
 
 ### Backend configuration overrides
 
@@ -148,6 +158,43 @@ Useful commands:
 - `laizy check-backends` — inspect backend readiness for configured worker roles
 - `laizy transition` — record milestone lifecycle changes
 - `laizy record-verification-result` — persist verification evidence
+
+## Runtime examples
+
+OpenClaw handoff example:
+
+```json
+{
+  "adapter": "sessions_spawn",
+  "runtime": "subagent",
+  "operatorGuidance": {
+    "loopSummary": "Keep Laizy as the control plane: start-run once, then supervisor-tick to emit the next bounded action from durable repo state."
+  }
+}
+```
+
+Codex CLI handoff example:
+
+```bash
+codex exec --full-auto "<contract emitted by Laizy>"
+```
+
+Claude Code handoff example:
+
+```bash
+claude --permission-mode bypassPermissions --print "<contract emitted by Laizy>"
+```
+
+Local watchdog example:
+
+```bash
+laizy watchdog \
+  --snapshot state/runs/example-run.json \
+  --out-dir state/runs/example-run.supervisor \
+  --interval-seconds 300 \
+  --stall-threshold-minutes 15 \
+  --verification-command "/usr/bin/node scripts/build-check.mjs"
+```
 
 ## Example lifecycle
 
