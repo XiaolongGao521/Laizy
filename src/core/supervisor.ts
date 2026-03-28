@@ -5,7 +5,7 @@ import {
   createBackendCheckResult,
   writeBackendCheckResult,
 } from './backend-preflight.js';
-import { summarizeEventDerivedState } from './events.js';
+import { deriveVerificationRetryContext, summarizeEventDerivedState } from './events.js';
 import { createImplementerContract, createPlannerRequest, selectNextActionableMilestone, writeContractDocument } from './contracts.js';
 import {
   createClaudeCodeExecAdapter,
@@ -91,6 +91,7 @@ export function createSupervisorDecision(
   const activeMilestone = selectNextActionableMilestone(snapshot);
   const actions: SupervisorAction[] = [];
   const eventDerivedState = summarizeEventDerivedState(snapshot);
+  const verificationRetryContext = deriveVerificationRetryContext(snapshot, activeMilestone?.id ?? null);
 
   const buildContinuation = (decision: SupervisorDecisionName): SupervisorDecision['continuation'] => {
     if (decision === 'closeout') {
@@ -104,7 +105,9 @@ export function createSupervisorDecision(
     if (decision === 'verify') {
       return {
         mode: 'verify-active-milestone',
-        summary: `Active milestone ${activeMilestone?.id ?? 'unknown'} is waiting on an explicit verification result with recorded evidence.`,
+        summary: verificationRetryContext.shouldRetryActiveMilestone
+          ? verificationRetryContext.retrySummary ?? `Retry verification for milestone ${activeMilestone?.id ?? 'unknown'} within the same milestone boundary after addressing the latest failed verification result.`
+          : `Active milestone ${activeMilestone?.id ?? 'unknown'} is waiting on an explicit verification result with recorded evidence.`,
         recommendedDocumentKind: 'verification.command',
       };
     }
@@ -121,11 +124,13 @@ export function createSupervisorDecision(
       const isResume = snapshot.status === 'implementing' && eventDerivedState.eventCount > 1;
       return {
         mode: isResume ? 'resume-after-rebuild' : snapshot.status === 'planned' ? 'start-next-milestone' : 'continue-active-milestone',
-        summary: snapshot.status === 'planned'
-          ? `Start milestone ${activeMilestone?.id ?? 'unknown'} using the emitted implementer contract.`
-          : isResume
-            ? `Resume milestone ${activeMilestone?.id ?? 'unknown'} from the current snapshot/event-log state using the emitted implementer contract.`
-            : `Continue milestone ${activeMilestone?.id ?? 'unknown'} using the emitted implementer contract.`,
+        summary: verificationRetryContext.shouldRetryActiveMilestone
+          ? verificationRetryContext.retrySummary ?? `Continue milestone ${activeMilestone?.id ?? 'unknown'} within the same milestone boundary after failed verification.`
+          : snapshot.status === 'planned'
+            ? `Start milestone ${activeMilestone?.id ?? 'unknown'} using the emitted implementer contract.`
+            : isResume
+              ? `Resume milestone ${activeMilestone?.id ?? 'unknown'} from the current snapshot/event-log state using the emitted implementer contract.`
+              : `Continue milestone ${activeMilestone?.id ?? 'unknown'} using the emitted implementer contract.`,
         recommendedDocumentKind: 'implementer.contract',
       };
     }
@@ -245,37 +250,54 @@ export function createSupervisorDecision(
     actions.push({
       id: 'run-verification',
       kind: 'verification.command',
-      title: 'Run verification for the active verification-gated milestone',
+      title: verificationRetryContext.shouldRetryActiveMilestone
+        ? 'Retry verification for the active verification-gated milestone'
+        : 'Run verification for the active verification-gated milestone',
       worker: snapshot.workers.verifier,
       requiresExternalExecution: true,
       documentPath: null,
       documentKind: 'verification.command',
-      summary: `Run verification for milestone ${activeMilestone?.id ?? 'unknown'} and record evidence before completing the verification-gated milestone.`,
+      summary: verificationRetryContext.shouldRetryActiveMilestone
+        ? verificationRetryContext.retrySummary ?? `Retry verification for milestone ${activeMilestone?.id ?? 'unknown'} and keep the retry scoped to the active milestone.`
+        : `Run verification for milestone ${activeMilestone?.id ?? 'unknown'} and record evidence before completing the verification-gated milestone.`,
       runtimeProfile: null,
     });
 
-    return buildDecision('verify', 'The active verification-gated milestone is in verifying state and needs an explicit verification result with recorded evidence.');
+    return buildDecision(
+      'verify',
+      verificationRetryContext.shouldRetryActiveMilestone
+        ? verificationRetryContext.retrySummary ?? 'The latest verification result failed, so the next action is a bounded retry on the active milestone.'
+        : 'The active verification-gated milestone is in verifying state and needs an explicit verification result with recorded evidence.',
+    );
   }
 
   actions.push({
     id: 'continue-implementer',
     kind: 'implementer.contract',
-    title: snapshot.status === 'planned' ? 'Start the next verification-gated milestone' : 'Continue the active verification-gated milestone',
+    title: verificationRetryContext.shouldRetryActiveMilestone
+      ? 'Retry the active verification-gated milestone after failed verification'
+      : snapshot.status === 'planned'
+        ? 'Start the next verification-gated milestone'
+        : 'Continue the active verification-gated milestone',
     worker: snapshot.workers.implementer,
     requiresExternalExecution: true,
     documentPath: null,
     documentKind: 'implementer.contract',
-    summary: snapshot.status === 'planned'
-      ? `Start milestone ${activeMilestone?.id ?? 'unknown'} as the next bounded step in the repo-native control loop.`
-      : `Continue milestone ${activeMilestone?.id ?? 'unknown'} as a bounded step in the repo-native control loop without widening scope.`,
+    summary: verificationRetryContext.shouldRetryActiveMilestone
+      ? verificationRetryContext.retrySummary ?? `Retry milestone ${activeMilestone?.id ?? 'unknown'} as a bounded step in the repo-native control loop without widening scope.`
+      : snapshot.status === 'planned'
+        ? `Start milestone ${activeMilestone?.id ?? 'unknown'} as the next bounded step in the repo-native control loop.`
+        : `Continue milestone ${activeMilestone?.id ?? 'unknown'} as a bounded step in the repo-native control loop without widening scope.`,
     runtimeProfile: null,
   });
 
   return buildDecision(
     'continue',
-    snapshot.status === 'planned'
-      ? 'The repo-native control loop has an actionable milestone and no active implementer progress yet.'
-      : 'The active verification-gated milestone remains healthy and should continue under the bounded contract.',
+    verificationRetryContext.shouldRetryActiveMilestone
+      ? verificationRetryContext.retrySummary ?? 'The latest verification result failed, so the next action is a bounded retry on the active milestone.'
+      : snapshot.status === 'planned'
+        ? 'The repo-native control loop has an actionable milestone and no active implementer progress yet.'
+        : 'The active verification-gated milestone remains healthy and should continue under the bounded contract.',
   );
 }
 

@@ -87,12 +87,36 @@ function normalizeVerificationRecord(record: RunSnapshot['verification'][number]
     };
 }
 
+export function deriveVerificationRetryContext(snapshot: RunSnapshot, milestoneId: string | null) {
+  if (!milestoneId) {
+    return {
+      latestVerification: null,
+      shouldRetryActiveMilestone: false,
+      retrySummary: null,
+    };
+  }
+
+  const latestVerification = getLatestVerification(snapshot, milestoneId);
+  const normalizedLatestVerification = latestVerification ? normalizeVerificationRecord(latestVerification) : null;
+  const shouldRetryActiveMilestone = normalizedLatestVerification?.status === 'failed';
+  const reviewerNextAction = normalizedLatestVerification?.evidence.reviewerNextAction ?? null;
+  const retrySummary = shouldRetryActiveMilestone
+    ? reviewerNextAction
+      ? `Retry ${milestoneId} within the same milestone boundary after addressing failed verification findings (reviewer next action: ${reviewerNextAction}).`
+      : `Retry ${milestoneId} within the same milestone boundary after addressing the latest failed verification result.`
+    : null;
+
+  return {
+    latestVerification: normalizedLatestVerification,
+    shouldRetryActiveMilestone,
+    retrySummary,
+  };
+}
+
 export function summarizeEventDerivedState(snapshot: RunSnapshot) {
   const activeMilestone = snapshot.milestones.find((milestone) => milestone.id === snapshot.currentMilestoneId) ?? null;
-  const latestVerification = activeMilestone ? getLatestVerification(snapshot, activeMilestone.id) : null;
   const latestRecovery = snapshot.recovery.length > 0 ? snapshot.recovery[snapshot.recovery.length - 1] : null;
-
-  const normalizedLatestVerification = latestVerification ? normalizeVerificationRecord(latestVerification) : null;
+  const verificationRetryContext = deriveVerificationRetryContext(snapshot, activeMilestone?.id ?? null);
 
   return {
     source: 'snapshot' as const,
@@ -107,14 +131,14 @@ export function summarizeEventDerivedState(snapshot: RunSnapshot) {
         lastNote: activeMilestone.lastNote,
       }
       : null,
-    latestVerification: normalizedLatestVerification
+    latestVerification: verificationRetryContext.latestVerification
       ? {
-        milestoneId: normalizedLatestVerification.milestoneId,
-        command: normalizedLatestVerification.command,
-        status: normalizedLatestVerification.status,
-        at: normalizedLatestVerification.at,
-        summary: normalizedLatestVerification.summary,
-        evidence: normalizedLatestVerification.evidence,
+        milestoneId: verificationRetryContext.latestVerification.milestoneId,
+        command: verificationRetryContext.latestVerification.command,
+        status: verificationRetryContext.latestVerification.status,
+        at: verificationRetryContext.latestVerification.at,
+        summary: verificationRetryContext.latestVerification.summary,
+        evidence: verificationRetryContext.latestVerification.evidence,
       }
       : null,
     latestRecovery: latestRecovery

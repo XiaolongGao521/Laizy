@@ -146,6 +146,36 @@ node dist/src/index.js record-verification-result \
 
 Only after the passed verification result is recorded should the milestone move to `completed`.
 
+If verification fails, keep the retry bounded to the same milestone and let the durable artifacts explain the redo path:
+
+```bash
+node dist/src/index.js record-verification-result \
+  --snapshot state/runs/example-run.json \
+  --milestone E2 \
+  --command "/usr/bin/node scripts/build-check.mjs" \
+  --status failed \
+  --reviewer-output state/verification/example-review.json \
+  --summary "build-check failed; address findings and retry E2"
+
+node dist/src/index.js transition \
+  --snapshot state/runs/example-run.json \
+  --milestone E2 \
+  --status implementing \
+  --note "retrying E2 after failed verification"
+
+node dist/src/index.js supervisor-tick \
+  --snapshot state/runs/example-run.json \
+  --out-dir state/runs/example-run.supervisor-retry
+```
+
+After that retry-oriented supervisor tick, inspect the new bundle and confirm it is still scoped to `E2`:
+
+- `supervisor-decision.json` should keep `activeMilestoneId: "E2"`
+- `eventDerivedState.latestVerification.status` should show `failed`
+- `eventDerivedState.latestVerification.evidence.reviewerNextAction` explains the reviewer-directed redo step when present
+- `decision.reason`, `continuation.summary`, and the implementer action summary should explicitly say the next move is a bounded retry on the active milestone rather than a broader recovery or a new milestone
+- `E2.implementer-contract.json` remains the durable handoff document for the redo path, so the retry stays compatibility-safe and single-milestone scoped
+
 The repository build-check reinforces this example by asserting the docs and runtime flows keep describing the same restart-safe supervisor/recovery behavior.
 
 ## 8. Milestone closeout
