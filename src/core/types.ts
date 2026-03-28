@@ -8,7 +8,13 @@ export type MilestonePlanEntry = {
 
 export type MilestoneStatus = 'planned' | 'implementing' | 'verifying' | 'completed' | 'blocked';
 export type VerificationStatus = 'pending' | 'passed' | 'failed';
+
+// Canonical worker role names for operator-facing docs, emitted artifacts, and runtime adapters.
+// Keep these values stable unless a future compatibility plan introduces aliases/migration support.
 export type WorkerRole = 'planner' | 'implementer' | 'watchdog' | 'recovery' | 'verifier';
+
+// Backend identifiers are part of emitted adapter/configuration documents.
+// Prefer wording cleanup in human-facing summaries before changing any stable backend keys.
 export type BackendKind = 'openclaw' | 'codex-cli' | 'claude-code' | 'laizy-watchdog';
 export type BackendProbeName = 'installation' | 'invocation' | 'liveness';
 export type BackendProbeStatus = 'not-run' | 'not-applicable' | 'passed' | 'failed';
@@ -116,6 +122,8 @@ export type PlanState = {
   pendingMilestoneCount: number;
 };
 
+// Run snapshots are durable machine-readable state.
+// Preserve existing property names for compatibility with event-log rebuilds and downstream tooling.
 export type RunSnapshot = {
   schemaVersion: number;
   runId: string;
@@ -139,6 +147,7 @@ export type RunSnapshot = {
   lastEventAt?: string | null;
 };
 
+// Event records are append-only wire artifacts; keep event type strings stable.
 export type RunEvent = {
   type: 'run.initialized' | 'milestone.transition' | 'worker.heartbeat' | 'recovery.action' | 'verification.recorded';
   at: string;
