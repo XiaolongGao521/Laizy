@@ -344,5 +344,35 @@ export type SupervisorDecision = {
   decision: SupervisorDecisionName;
   runtimeProfile: SupervisorRuntimeProfile;
   reason: string;
+  eventDerivedState: {
+    source: 'snapshot';
+    eventCount: number;
+    lastEventAt: string | null;
+    activeMilestone: {
+      id: string;
+      title: string;
+      status: MilestoneStatus;
+      updatedAt: string;
+      lastNote: string | null;
+    } | null;
+    latestVerification: {
+      milestoneId: string;
+      status: VerificationStatus;
+      at: string;
+      summary: string | null;
+    } | null;
+    latestRecovery: {
+      action: string;
+      worker: WorkerLabel;
+      at: string;
+      reason: string;
+      milestoneId: string | null;
+    } | null;
+  };
+  continuation: {
+    mode: 'none' | 'start-next-milestone' | 'continue-active-milestone' | 'resume-after-rebuild' | 'recover-before-continuing' | 'verify-active-milestone' | 'closeout';
+    summary: string;
+    recommendedDocumentKind: string | null;
+  };
   actions: SupervisorAction[];
 };

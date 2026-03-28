@@ -5,6 +5,7 @@ import {
   createBackendCheckResult,
   writeBackendCheckResult,
 } from './backend-preflight.js';
+import { summarizeEventDerivedState } from './events.js';
 import { createImplementerContract, createPlannerRequest, selectNextActionableMilestone, writeContractDocument } from './contracts.js';
 import {
   createClaudeCodeExecAdapter,
@@ -89,6 +90,54 @@ export function createSupervisorDecision(
   });
   const activeMilestone = selectNextActionableMilestone(snapshot);
   const actions: SupervisorAction[] = [];
+  const eventDerivedState = summarizeEventDerivedState(snapshot);
+
+  const buildContinuation = (decision: SupervisorDecisionName): SupervisorDecision['continuation'] => {
+    if (decision === 'closeout') {
+      return {
+        mode: 'closeout',
+        summary: 'All milestones are complete; only watchdog/control-loop shutdown remains.',
+        recommendedDocumentKind: 'openclaw.cron',
+      };
+    }
+
+    if (decision === 'verify') {
+      return {
+        mode: 'verify-active-milestone',
+        summary: `Active milestone ${activeMilestone?.id ?? 'unknown'} is waiting on an explicit verification result.`,
+        recommendedDocumentKind: 'verification.command',
+      };
+    }
+
+    if (decision === 'recover') {
+      return {
+        mode: 'recover-before-continuing',
+        summary: healthReport.recoveryRecommendation.summary,
+        recommendedDocumentKind: 'recovery.plan',
+      };
+    }
+
+    if (decision === 'continue') {
+      const isResume = snapshot.status === 'implementing' && eventDerivedState.eventCount > 1;
+      return {
+        mode: isResume ? 'resume-after-rebuild' : snapshot.status === 'planned' ? 'start-next-milestone' : 'continue-active-milestone',
+        summary: snapshot.status === 'planned'
+          ? `Start milestone ${activeMilestone?.id ?? 'unknown'} using the emitted implementer contract.`
+          : isResume
+            ? `Resume milestone ${activeMilestone?.id ?? 'unknown'} from the current snapshot/event-log state using the emitted implementer contract.`
+            : `Continue milestone ${activeMilestone?.id ?? 'unknown'} using the emitted implementer contract.`,
+        recommendedDocumentKind: 'implementer.contract',
+      };
+    }
+
+    return {
+      mode: 'none',
+      summary: decision === 'plan'
+        ? 'Create the initial bounded plan request before starting implementation.'
+        : 'Repair the bounded plan for the blocked milestone before continuing.',
+      recommendedDocumentKind: 'planner.request',
+    };
+  };
 
   const buildDecision = (decision: SupervisorDecisionName, reason: string): SupervisorDecision => {
     const runtimeProfile = selectSupervisorRuntimeProfile(snapshot, decision, activeMilestone);
@@ -106,6 +155,8 @@ export function createSupervisorDecision(
       decision,
       runtimeProfile,
       reason,
+      eventDerivedState,
+      continuation: buildContinuation(decision),
       actions: actions.map((action) => ({
         ...action,
         runtimeProfile: action.runtimeProfile ?? runtimeProfile,
@@ -446,7 +497,17 @@ export function writeSupervisorBundle(
     eventLogPath: snapshot.eventLogPath ?? null,
     outputDir: resolvedOutputDir,
     decision: decisionPath,
+    decisionSummary: {
+      decision: decision.decision,
+      reason: decision.reason,
+      continuation: decision.continuation,
+      eventDerivedState: decision.eventDerivedState,
+    },
     documents,
+    documentOrder: [
+      'supervisor-decision.json',
+      ...Object.entries(documents).map(([key, documentPath]) => `${key}:${documentPath}`),
+    ],
   } as never);
 
   return {

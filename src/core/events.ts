@@ -66,6 +66,44 @@ function getLatestVerification(snapshot: RunSnapshot, milestoneId: string) {
     .find((record) => record.milestoneId === milestoneId) ?? null;
 }
 
+export function summarizeEventDerivedState(snapshot: RunSnapshot) {
+  const activeMilestone = snapshot.milestones.find((milestone) => milestone.id === snapshot.currentMilestoneId) ?? null;
+  const latestVerification = activeMilestone ? getLatestVerification(snapshot, activeMilestone.id) : null;
+  const latestRecovery = snapshot.recovery.length > 0 ? snapshot.recovery[snapshot.recovery.length - 1] : null;
+
+  return {
+    source: 'snapshot' as const,
+    eventCount: snapshot.eventCount ?? 0,
+    lastEventAt: snapshot.lastEventAt ?? null,
+    activeMilestone: activeMilestone
+      ? {
+        id: activeMilestone.id,
+        title: activeMilestone.title,
+        status: activeMilestone.status,
+        updatedAt: activeMilestone.updatedAt,
+        lastNote: activeMilestone.lastNote,
+      }
+      : null,
+    latestVerification: latestVerification
+      ? {
+        milestoneId: latestVerification.milestoneId,
+        status: latestVerification.status,
+        at: latestVerification.at,
+        summary: latestVerification.summary,
+      }
+      : null,
+    latestRecovery: latestRecovery
+      ? {
+        action: latestRecovery.action,
+        worker: latestRecovery.worker,
+        at: latestRecovery.at,
+        reason: latestRecovery.reason,
+        milestoneId: latestRecovery.milestoneId,
+      }
+      : null,
+  };
+}
+
 export function eventLogPathForSnapshot(snapshotPath: string): string {
   const resolved = path.resolve(snapshotPath);
   return resolved.endsWith('.json')
