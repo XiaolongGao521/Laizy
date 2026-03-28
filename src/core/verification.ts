@@ -3,7 +3,15 @@ import path from 'node:path';
 
 import { selectSupervisorRuntimeProfile } from './runtime-profile.js';
 
-import type { ReviewerOutput, RunSnapshot, SnapshotMilestone, VerificationStatus } from './types.js';
+import type {
+  ReviewerOutput,
+  RunSnapshot,
+  SnapshotMilestone,
+  VerificationArtifactKind,
+  VerificationArtifactSummary,
+  VerificationEvidenceSummary,
+  VerificationStatus,
+} from './types.js';
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
@@ -19,12 +27,108 @@ function findMilestone(snapshot: RunSnapshot, milestoneId: string): SnapshotMile
   return milestone;
 }
 
+function normalizeOptionalText(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+export function createVerificationArtifactSummary(
+  snapshot: RunSnapshot,
+  milestone: SnapshotMilestone,
+  {
+    artifactKind,
+    stage,
+    command,
+    verdict,
+    nextAction,
+    findingCount,
+  }: {
+    artifactKind: VerificationArtifactKind;
+    stage?: string | null;
+    command?: string | null;
+    verdict?: string | null;
+    nextAction?: string | null;
+    findingCount?: number;
+  },
+): VerificationArtifactSummary {
+  return {
+    schemaVersion: 1,
+    artifactKind,
+    comparisonKey: `${snapshot.runId}:${milestone.id}`,
+    runId: snapshot.runId,
+    worker: snapshot.workers.verifier,
+    milestoneId: milestone.id,
+    milestoneTitle: milestone.title,
+    milestoneStatus: milestone.status,
+    milestoneLineNumber: milestone.lineNumber,
+    stage: normalizeOptionalText(stage),
+    command: normalizeOptionalText(command),
+    verdict: normalizeOptionalText(verdict),
+    nextAction: normalizeOptionalText(nextAction),
+    findingCount: Math.max(0, findingCount ?? 0),
+  };
+}
+
+export function createVerificationEvidenceSummary({
+  outputPath,
+  summary,
+  reviewerOutput,
+}: {
+  outputPath?: string | null;
+  summary?: string | null;
+  reviewerOutput?: ReviewerOutput | null;
+}): VerificationEvidenceSummary {
+  const normalizedOutputPath = normalizeOptionalText(outputPath);
+  const normalizedSummary = normalizeOptionalText(summary);
+  const sources: VerificationEvidenceSummary['sources'] = [];
+
+  if (normalizedOutputPath) {
+    sources.push('output-path');
+  }
+
+  if (normalizedSummary) {
+    sources.push('summary');
+  }
+
+  if (reviewerOutput) {
+    sources.push('reviewer-output');
+  }
+
+  return {
+    hasRecordedEvidence: sources.length > 0,
+    sources,
+    reviewerVerdict: reviewerOutput ? normalizeOptionalText(reviewerOutput.verdict) : null,
+    reviewerNextAction: reviewerOutput ? normalizeOptionalText(reviewerOutput.nextAction) : null,
+    findingCount: reviewerOutput ? reviewerOutput.findings.length : 0,
+  };
+}
+
+export function hasRecordedVerificationEvidence({
+  outputPath,
+  summary,
+  reviewerOutput,
+  evidence,
+}: {
+  outputPath?: string | null;
+  summary?: string | null;
+  reviewerOutput?: ReviewerOutput | null;
+  evidence?: VerificationEvidenceSummary | null;
+}): boolean {
+  return (evidence ?? createVerificationEvidenceSummary({ outputPath, summary, reviewerOutput })).hasRecordedEvidence;
+}
+
 export function createVerificationCommand(
   snapshot: RunSnapshot,
   options: { milestoneId?: string; command?: string; stage?: string } = {},
 ) {
   const milestone = findMilestone(snapshot, options.milestoneId ?? snapshot.currentMilestoneId!);
   const runtimeProfile = selectSupervisorRuntimeProfile(snapshot, 'verify', milestone);
+  const command = options.command ?? 'npm run build';
+  const stage = options.stage ?? 'post-implementation';
 
   return {
     schemaVersion: 1,
@@ -42,12 +146,17 @@ export function createVerificationCommand(
       lineNumber: milestone.lineNumber,
       details: clone(milestone.details ?? []),
     },
-    command: options.command ?? 'npm run build',
-    stage: options.stage ?? 'post-implementation',
+    artifactSummary: createVerificationArtifactSummary(snapshot, milestone, {
+      artifactKind: 'verification.command',
+      stage,
+      command,
+    }),
+    command,
+    stage,
     instructions: [
       'Run the verification command exactly as written unless explicitly overridden.',
-      'Record the verification result before milestone completion is declared.',
-      'Do not mark the milestone completed unless verification status is passed.',
+      'Record the verification result and supporting evidence before milestone completion is declared.',
+      'Do not mark the milestone completed unless verification status is passed and evidence is recorded.',
     ],
   };
 }
@@ -57,6 +166,9 @@ export function createReviewerOutput(
   options: { milestoneId?: string; verdict?: string; summary?: string; findings?: string[]; nextAction?: string } = {},
 ): ReviewerOutput {
   const milestone = findMilestone(snapshot, options.milestoneId ?? snapshot.currentMilestoneId!);
+  const verdict = options.verdict ?? 'needs-review';
+  const findings = clone(options.findings ?? []);
+  const nextAction = options.nextAction ?? 'address-findings';
 
   return {
     schemaVersion: 1,
@@ -69,10 +181,16 @@ export function createReviewerOutput(
       title: milestone.title,
       status: milestone.status,
     },
-    verdict: options.verdict ?? 'needs-review',
+    artifactSummary: createVerificationArtifactSummary(snapshot, milestone, {
+      artifactKind: 'reviewer.output',
+      verdict,
+      nextAction,
+      findingCount: findings.length,
+    }),
+    verdict,
     summary: options.summary ?? '',
-    findings: clone(options.findings ?? []),
-    nextAction: options.nextAction ?? 'address-findings',
+    findings,
+    nextAction,
   };
 }
 
@@ -87,17 +205,26 @@ export function createVerificationResultRecord({
   milestoneId: string;
   command: string;
   status: VerificationStatus;
-  outputPath?: string;
-  summary?: string;
+  outputPath?: string | null;
+  summary?: string | null;
   reviewerOutput?: ReviewerOutput | null;
 }) {
+  const normalizedOutputPath = normalizeOptionalText(outputPath);
+  const normalizedSummary = normalizeOptionalText(summary);
+  const normalizedReviewerOutput = reviewerOutput ?? null;
+
   return {
     milestoneId,
     command,
     status,
-    outputPath: outputPath ?? null,
-    summary: summary ?? null,
-    reviewerOutput: reviewerOutput ?? null,
+    outputPath: normalizedOutputPath,
+    summary: normalizedSummary,
+    reviewerOutput: normalizedReviewerOutput,
+    evidence: createVerificationEvidenceSummary({
+      outputPath: normalizedOutputPath,
+      summary: normalizedSummary,
+      reviewerOutput: normalizedReviewerOutput,
+    }),
   };
 }
 

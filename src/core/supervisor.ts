@@ -104,7 +104,7 @@ export function createSupervisorDecision(
     if (decision === 'verify') {
       return {
         mode: 'verify-active-milestone',
-        summary: `Active milestone ${activeMilestone?.id ?? 'unknown'} is waiting on an explicit verification result.`,
+        summary: `Active milestone ${activeMilestone?.id ?? 'unknown'} is waiting on an explicit verification result with recorded evidence.`,
         recommendedDocumentKind: 'verification.command',
       };
     }
@@ -250,11 +250,11 @@ export function createSupervisorDecision(
       requiresExternalExecution: true,
       documentPath: null,
       documentKind: 'verification.command',
-      summary: `Run verification for milestone ${activeMilestone?.id ?? 'unknown'} before completing the verification-gated milestone.`,
+      summary: `Run verification for milestone ${activeMilestone?.id ?? 'unknown'} and record evidence before completing the verification-gated milestone.`,
       runtimeProfile: null,
     });
 
-    return buildDecision('verify', 'The active verification-gated milestone is in verifying state and needs an explicit verification result.');
+    return buildDecision('verify', 'The active verification-gated milestone is in verifying state and needs an explicit verification result with recorded evidence.');
   }
 
   actions.push({

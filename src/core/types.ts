@@ -85,6 +85,34 @@ export type RecoveryRecord = {
   at: string;
 };
 
+export type VerificationArtifactKind = 'verification.command' | 'reviewer.output';
+export type VerificationEvidenceSource = 'output-path' | 'summary' | 'reviewer-output';
+
+export type VerificationArtifactSummary = {
+  schemaVersion: number;
+  artifactKind: VerificationArtifactKind;
+  comparisonKey: string;
+  runId: string;
+  worker: WorkerLabel;
+  milestoneId: string;
+  milestoneTitle: string;
+  milestoneStatus: MilestoneStatus;
+  milestoneLineNumber: number | null;
+  stage: string | null;
+  command: string | null;
+  verdict: string | null;
+  nextAction: string | null;
+  findingCount: number;
+};
+
+export type VerificationEvidenceSummary = {
+  hasRecordedEvidence: boolean;
+  sources: VerificationEvidenceSource[];
+  reviewerVerdict: string | null;
+  reviewerNextAction: string | null;
+  findingCount: number;
+};
+
 export type ReviewerOutput = {
   schemaVersion: number;
   kind: 'reviewer.output';
@@ -96,6 +124,7 @@ export type ReviewerOutput = {
     title: string;
     status: MilestoneStatus;
   };
+  artifactSummary: VerificationArtifactSummary;
   verdict: string;
   summary: string;
   findings: string[];
@@ -109,6 +138,7 @@ export type VerificationRecord = {
   outputPath: string | null;
   summary: string | null;
   reviewerOutput: ReviewerOutput | null;
+  evidence: VerificationEvidenceSummary;
   at: string;
 };
 
@@ -357,9 +387,11 @@ export type SupervisorDecision = {
     } | null;
     latestVerification: {
       milestoneId: string;
+      command: string;
       status: VerificationStatus;
       at: string;
       summary: string | null;
+      evidence: VerificationEvidenceSummary;
     } | null;
     latestRecovery: {
       action: string;

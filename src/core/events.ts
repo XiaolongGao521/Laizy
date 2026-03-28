@@ -7,6 +7,11 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 
+import {
+  createVerificationResultRecord,
+  hasRecordedVerificationEvidence,
+} from './verification.js';
+
 import type {
   ReviewerOutput,
   RunEvent,
@@ -66,10 +71,28 @@ function getLatestVerification(snapshot: RunSnapshot, milestoneId: string) {
     .find((record) => record.milestoneId === milestoneId) ?? null;
 }
 
+function normalizeVerificationRecord(record: RunSnapshot['verification'][number]) {
+  return record.evidence
+    ? record
+    : {
+      ...record,
+      evidence: createVerificationResultRecord({
+        milestoneId: record.milestoneId,
+        command: record.command,
+        status: record.status,
+        outputPath: record.outputPath ?? undefined,
+        summary: record.summary ?? undefined,
+        reviewerOutput: record.reviewerOutput,
+      }).evidence,
+    };
+}
+
 export function summarizeEventDerivedState(snapshot: RunSnapshot) {
   const activeMilestone = snapshot.milestones.find((milestone) => milestone.id === snapshot.currentMilestoneId) ?? null;
   const latestVerification = activeMilestone ? getLatestVerification(snapshot, activeMilestone.id) : null;
   const latestRecovery = snapshot.recovery.length > 0 ? snapshot.recovery[snapshot.recovery.length - 1] : null;
+
+  const normalizedLatestVerification = latestVerification ? normalizeVerificationRecord(latestVerification) : null;
 
   return {
     source: 'snapshot' as const,
@@ -84,12 +107,14 @@ export function summarizeEventDerivedState(snapshot: RunSnapshot) {
         lastNote: activeMilestone.lastNote,
       }
       : null,
-    latestVerification: latestVerification
+    latestVerification: normalizedLatestVerification
       ? {
-        milestoneId: latestVerification.milestoneId,
-        status: latestVerification.status,
-        at: latestVerification.at,
-        summary: latestVerification.summary,
+        milestoneId: normalizedLatestVerification.milestoneId,
+        command: normalizedLatestVerification.command,
+        status: normalizedLatestVerification.status,
+        at: normalizedLatestVerification.at,
+        summary: normalizedLatestVerification.summary,
+        evidence: normalizedLatestVerification.evidence,
       }
       : null,
     latestRecovery: latestRecovery
@@ -196,18 +221,19 @@ export function createVerificationRecordedEvent({
   reviewerOutput?: ReviewerOutput | null;
 }): RunEvent {
   ensureVerificationStatus(status);
+  const record = createVerificationResultRecord({
+    milestoneId,
+    command,
+    status,
+    outputPath,
+    summary,
+    reviewerOutput,
+  });
 
   return {
     type: 'verification.recorded',
     at: new Date().toISOString(),
-    detail: {
-      milestoneId,
-      command,
-      status,
-      outputPath: outputPath ?? null,
-      summary: summary ?? null,
-      reviewerOutput: reviewerOutput ?? null,
-    },
+    detail: record,
   };
 }
 
@@ -312,8 +338,8 @@ function applyEvent(snapshot: RunSnapshot & { eventCount: number; lastEventAt: s
     ensureMilestoneStatus(status);
     if (status === 'completed') {
       const latestVerification = getLatestVerification(snapshot, milestone.id);
-      if (!latestVerification || latestVerification.status !== 'passed') {
-        throw new Error(`Cannot complete milestone ${milestone.id} without a passed verification result`);
+      if (!latestVerification || latestVerification.status !== 'passed' || !hasRecordedVerificationEvidence(latestVerification)) {
+        throw new Error(`Cannot complete milestone ${milestone.id} without a passed verification result and recorded evidence`);
       }
     }
 
@@ -353,12 +379,14 @@ function applyEvent(snapshot: RunSnapshot & { eventCount: number; lastEventAt: s
     const status = String(event.detail.status);
     ensureVerificationStatus(status);
     snapshot.verification.push({
-      milestoneId: String(event.detail.milestoneId),
-      command: String(event.detail.command),
-      status,
-      outputPath: typeof event.detail.outputPath === 'string' ? event.detail.outputPath : null,
-      summary: typeof event.detail.summary === 'string' ? event.detail.summary : null,
-      reviewerOutput: clone((event.detail.reviewerOutput as ReviewerOutput | null | undefined) ?? null),
+      ...createVerificationResultRecord({
+        milestoneId: String(event.detail.milestoneId),
+        command: String(event.detail.command),
+        status,
+        outputPath: typeof event.detail.outputPath === 'string' ? event.detail.outputPath : null,
+        summary: typeof event.detail.summary === 'string' ? event.detail.summary : null,
+        reviewerOutput: clone((event.detail.reviewerOutput as ReviewerOutput | null | undefined) ?? null),
+      }),
       at: event.at,
     });
   }
@@ -441,8 +469,8 @@ export function transitionMilestone(snapshotPath: string, { milestoneId, status,
 
   if (status === 'completed') {
     const latestVerification = getLatestVerification(rebuiltBeforeAppend.snapshot, milestoneId);
-    if (!latestVerification || latestVerification.status !== 'passed') {
-      throw new Error(`Cannot complete milestone ${milestoneId} without a passed verification result`);
+    if (!latestVerification || latestVerification.status !== 'passed' || !hasRecordedVerificationEvidence(latestVerification)) {
+      throw new Error(`Cannot complete milestone ${milestoneId} without a passed verification result and recorded evidence`);
     }
   }
 
