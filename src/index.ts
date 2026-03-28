@@ -701,7 +701,12 @@ async function main() {
 
     if (typeof options.out === 'string') {
       const outputPath = writeOpenClawAdapter(options.out, document);
-      console.log(JSON.stringify({ outputPath, kind: document.kind, worker: document.worker.label }, null, 2));
+      console.log(JSON.stringify({
+        outputPath,
+        kind: document.kind,
+        worker: document.worker.label,
+        backendPreflight: document.payload.backendPreflight,
+      }, null, 2));
       return;
     }
 
@@ -760,7 +765,12 @@ async function main() {
 
     if (typeof options.out === 'string') {
       const outputPath = writeOpenClawAdapter(options.out, document);
-      console.log(JSON.stringify({ outputPath, kind: document.kind, worker: document.worker.label }, null, 2));
+      console.log(JSON.stringify({
+        outputPath,
+        kind: document.kind,
+        worker: document.worker.label,
+        backendPreflight: document.payload.backendPreflight,
+      }, null, 2));
       return;
     }
 
