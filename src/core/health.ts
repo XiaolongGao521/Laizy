@@ -1,6 +1,8 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
+import { summarizeManagedRunnerState } from './managed-runner.js';
+
 import type {
   HealthReport,
   RecoveryReasoningFact,
@@ -110,6 +112,7 @@ function createEvidence({
   progressSignal,
   idleMinutes,
   stallThresholdMinutes,
+  managedRunnerState,
 }: {
   snapshot: RunSnapshot;
   activeMilestone: RunSnapshot['milestones'][number] | null;
@@ -119,6 +122,7 @@ function createEvidence({
   progressSignal: ProgressSignal;
   idleMinutes: number | null;
   stallThresholdMinutes: number;
+  managedRunnerState: ReturnType<typeof summarizeManagedRunnerState>;
 }): RecoveryReasoningFact[] {
   return [
     {
@@ -188,6 +192,29 @@ function createEvidence({
       value: stallThresholdMinutes,
       detail: 'Configured inactivity threshold before the implementer is considered stalled.',
     },
+    {
+      label: 'managed-runner-launch-id',
+      value: managedRunnerState.launch?.launchId ?? null,
+      detail: managedRunnerState.launch
+        ? `Latest managed-runner launch for the active milestone is ${managedRunnerState.launch.launchId}.`
+        : 'No managed-runner launch has been recorded for the active milestone.',
+    },
+    {
+      label: 'managed-runner-status',
+      value: managedRunnerState.launch?.status ?? null,
+      detail: managedRunnerState.launch
+        ? `Latest managed-runner launch is in ${managedRunnerState.launch.status} state.`
+        : 'No managed-runner launch state is available for the active milestone.',
+    },
+    {
+      label: 'managed-runner-outcome',
+      value: managedRunnerState.result?.outcome ?? managedRunnerState.launch?.outcome ?? null,
+      detail: managedRunnerState.result
+        ? `Latest managed-runner result recorded outcome ${managedRunnerState.result.outcome}.`
+        : managedRunnerState.launch?.outcome
+          ? `Latest managed-runner launch recorded outcome ${managedRunnerState.launch.outcome}.`
+          : 'No managed-runner outcome has been recorded yet.',
+    },
   ];
 }
 
@@ -244,6 +271,7 @@ export function evaluateRunHealth(
   const implementerHeartbeatAt = implementerHeartbeat?.at ?? null;
   const milestoneUpdatedAt = activeMilestone?.updatedAt ?? null;
   const progressSignal = getProgressSignal({ implementerHeartbeatAt, milestoneUpdatedAt });
+  const managedRunnerState = summarizeManagedRunnerState(snapshot, 'implementer', activeMilestone?.id ?? null);
   const lastProgressMs = toTimestamp(progressSignal.at);
   const checkedAtMs = toTimestamp(checkedAt);
   const idleMs = Number.isFinite(lastProgressMs) ? checkedAtMs - lastProgressMs : null;
@@ -257,6 +285,7 @@ export function evaluateRunHealth(
     progressSignal,
     idleMinutes,
     stallThresholdMinutes,
+    managedRunnerState,
   });
 
   let overallStatus = 'healthy';

@@ -198,6 +198,7 @@ export type RunSnapshot = {
   milestones: SnapshotMilestone[];
   recovery: RecoveryRecord[];
   verification: VerificationRecord[];
+  managedRunners: ManagedRunnerState;
   snapshotPath?: string | null;
   eventLogPath?: string | null;
   eventCount?: number;
@@ -206,7 +207,14 @@ export type RunSnapshot = {
 
 // Event records are append-only wire artifacts; keep event type strings stable.
 export type RunEvent = {
-  type: 'run.initialized' | 'milestone.transition' | 'worker.heartbeat' | 'recovery.action' | 'verification.recorded';
+  type:
+    | 'run.initialized'
+    | 'milestone.transition'
+    | 'worker.heartbeat'
+    | 'recovery.action'
+    | 'verification.recorded'
+    | 'managed-runner.launch-recorded'
+    | 'managed-runner.result-recorded';
   at: string;
   detail: Record<string, unknown>;
 };
@@ -257,6 +265,120 @@ export type HealthReport = {
   lastProgressSource: 'implementer-heartbeat' | 'milestone-update' | 'none';
   idleMinutes: number | null;
   recoveryRecommendation: RecoveryRecommendation;
+};
+
+export type ManagedRunnerProvider = 'codex' | 'claude-code' | 'openclaw';
+export type ManagedRunnerWorkerRole = Exclude<WorkerRole, 'watchdog'>;
+export type ManagedRunnerLifecycleStatus = 'launching' | 'running' | 'finished';
+export type ManagedRunnerOutcome = 'succeeded' | 'failed' | 'timed_out' | 'cancelled' | 'launch_failed' | 'unknown';
+export type ManagedRunnerTrackingKind = 'pid' | 'exec-session' | 'session-key';
+export type ManagedRunnerContractKind =
+  | 'planner.request'
+  | 'implementer.contract'
+  | 'recovery.plan'
+  | 'verification.command';
+export type ManagedRunnerAdapterKind = 'openclaw.sessions_spawn' | 'codex-cli.exec' | 'claude-code.exec';
+
+export type ManagedRunnerTrackingHandle = {
+  kind: ManagedRunnerTrackingKind;
+  id: string;
+};
+
+export type ManagedRunnerArtifactReference = {
+  label: string;
+  path: string;
+};
+
+export type ManagedRunnerLaunchArtifact = {
+  schemaVersion: number;
+  kind: 'managed-runner.launch';
+  artifactPath: string | null;
+  launchId: string;
+  runId: string;
+  milestoneId: string | null;
+  provider: ManagedRunnerProvider;
+  worker: {
+    role: ManagedRunnerWorkerRole;
+    label: WorkerLabel;
+  };
+  status: ManagedRunnerLifecycleStatus;
+  outcome: ManagedRunnerOutcome | null;
+  requestedAt: string;
+  startedAt: string | null;
+  endedAt: string | null;
+  tracking: ManagedRunnerTrackingHandle | null;
+  contract: {
+    kind: ManagedRunnerContractKind;
+    path: string | null;
+  };
+  adapter: {
+    kind: ManagedRunnerAdapterKind;
+    path: string | null;
+  };
+  resultPath: string | null;
+  stdoutPath: string | null;
+  stderrPath: string | null;
+  runtimeProfile: SupervisorRuntimeProfile | null;
+  summary: string | null;
+  artifacts: ManagedRunnerArtifactReference[];
+  metadata: Record<string, unknown>;
+};
+
+export type ManagedRunnerResultArtifact = {
+  schemaVersion: number;
+  kind: 'managed-runner.result';
+  artifactPath: string | null;
+  launchId: string;
+  runId: string;
+  milestoneId: string | null;
+  provider: ManagedRunnerProvider;
+  worker: {
+    role: ManagedRunnerWorkerRole;
+    label: WorkerLabel;
+  };
+  status: ManagedRunnerLifecycleStatus;
+  outcome: ManagedRunnerOutcome;
+  exitCode: number | null;
+  startedAt: string | null;
+  endedAt: string | null;
+  tracking: ManagedRunnerTrackingHandle | null;
+  launchPath: string | null;
+  stdoutPath: string | null;
+  stderrPath: string | null;
+  summary: string | null;
+  artifacts: ManagedRunnerArtifactReference[];
+  metadata: Record<string, unknown>;
+};
+
+export type ManagedRunnerLaunchRequest = {
+  schemaVersion: number;
+  kind: 'managed-runner.launch-request';
+  generatedAt: string;
+  launchId: string;
+  runId: string;
+  milestoneId: string | null;
+  provider: ManagedRunnerProvider;
+  worker: {
+    role: ManagedRunnerWorkerRole;
+    label: WorkerLabel;
+  };
+  runtimeProfile: SupervisorRuntimeProfile | null;
+  launchArtifactPath: string;
+  resultArtifactPath: string;
+  contract: {
+    kind: ManagedRunnerContractKind;
+    path: string;
+  };
+  adapter: {
+    kind: ManagedRunnerAdapterKind;
+    path: string;
+  };
+  instructions: string[];
+};
+
+export type ManagedRunnerState = {
+  launches: ManagedRunnerLaunchArtifact[];
+  results: ManagedRunnerResultArtifact[];
 };
 
 export type PlannerRequest = {
@@ -427,6 +549,27 @@ export type SupervisorDecision = {
       reason: string;
       milestoneId: string | null;
     } | null;
+    latestManagedRunner: {
+      launch: {
+        launchId: string;
+        provider: ManagedRunnerProvider;
+        status: ManagedRunnerLifecycleStatus;
+        tracking: ManagedRunnerTrackingHandle | null;
+        requestedAt: string;
+        startedAt: string | null;
+        outcome: ManagedRunnerOutcome | null;
+        artifactPath: string | null;
+      } | null;
+      result: {
+        launchId: string;
+        provider: ManagedRunnerProvider;
+        status: ManagedRunnerLifecycleStatus;
+        outcome: ManagedRunnerOutcome;
+        exitCode: number | null;
+        endedAt: string | null;
+        artifactPath: string | null;
+      } | null;
+    };
   };
   continuation: {
     mode: 'none' | 'start-next-milestone' | 'continue-active-milestone' | 'resume-after-rebuild' | 'recover-before-continuing' | 'verify-active-milestone' | 'closeout';

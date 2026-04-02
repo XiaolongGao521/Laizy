@@ -16,6 +16,7 @@ import {
 import { evaluateRunHealth } from './health.js';
 import { createCronAdapter, createSessionSpawnAdapter, writeOpenClawAdapter } from './openclaw.js';
 import { createRecoveryPlan, writeRecoveryPlan } from './recovery.js';
+import { writeManagedRunnerLaunchBundle } from './managed-runner.js';
 import { selectSupervisorRuntimeProfile } from './runtime-profile.js';
 import { createVerificationCommand, writeVerificationDocument } from './verification.js';
 
@@ -108,7 +109,7 @@ export function createSupervisorDecision(
         summary: verificationRetryContext.shouldRetryActiveMilestone
           ? verificationRetryContext.retrySummary ?? `Retry verification for milestone ${activeMilestone?.id ?? 'unknown'} within the same milestone boundary after addressing the latest failed verification result.`
           : `Active milestone ${activeMilestone?.id ?? 'unknown'} is waiting on an explicit verification result with recorded evidence.`,
-        recommendedDocumentKind: 'verification.command',
+        recommendedDocumentKind: 'managed-runner.launch-request',
       };
     }
 
@@ -116,7 +117,7 @@ export function createSupervisorDecision(
       return {
         mode: 'recover-before-continuing',
         summary: healthReport.recoveryRecommendation.summary,
-        recommendedDocumentKind: 'recovery.plan',
+        recommendedDocumentKind: 'managed-runner.launch-request',
       };
     }
 
@@ -131,7 +132,7 @@ export function createSupervisorDecision(
             : isResume
               ? `Resume milestone ${activeMilestone?.id ?? 'unknown'} from the current snapshot/event-log state using the emitted implementer contract.`
               : `Continue milestone ${activeMilestone?.id ?? 'unknown'} using the emitted implementer contract.`,
-        recommendedDocumentKind: 'implementer.contract',
+        recommendedDocumentKind: 'managed-runner.launch-request',
       };
     }
 
@@ -140,7 +141,7 @@ export function createSupervisorDecision(
       summary: decision === 'plan'
         ? 'Create the initial bounded plan request before starting implementation.'
         : 'Repair the bounded plan for the blocked milestone before continuing.',
-      recommendedDocumentKind: 'planner.request',
+      recommendedDocumentKind: 'managed-runner.launch-request',
     };
   };
 
@@ -177,7 +178,7 @@ export function createSupervisorDecision(
       worker: snapshot.workers.planner,
       requiresExternalExecution: true,
       documentPath: null,
-      documentKind: 'planner.request',
+      documentKind: 'managed-runner.launch-request',
       summary: snapshot.planState.reason,
       runtimeProfile: null,
     });
@@ -222,7 +223,7 @@ export function createSupervisorDecision(
       worker: snapshot.workers.planner,
       requiresExternalExecution: true,
       documentPath: null,
-      documentKind: 'planner.request',
+      documentKind: 'managed-runner.launch-request',
       summary: activeMilestone.lastNote ?? 'The current verification-gated milestone is blocked and requires bounded plan repair.',
       runtimeProfile: null,
     });
@@ -238,7 +239,7 @@ export function createSupervisorDecision(
       worker: snapshot.workers.recovery,
       requiresExternalExecution: true,
       documentPath: null,
-      documentKind: 'recovery.plan',
+      documentKind: 'managed-runner.launch-request',
       summary: healthReport.recoveryRecommendation.summary,
       runtimeProfile: null,
     });
@@ -256,7 +257,7 @@ export function createSupervisorDecision(
       worker: snapshot.workers.verifier,
       requiresExternalExecution: true,
       documentPath: null,
-      documentKind: 'verification.command',
+      documentKind: 'managed-runner.launch-request',
       summary: verificationRetryContext.shouldRetryActiveMilestone
         ? verificationRetryContext.retrySummary ?? `Retry verification for milestone ${activeMilestone?.id ?? 'unknown'} and keep the retry scoped to the active milestone.`
         : `Run verification for milestone ${activeMilestone?.id ?? 'unknown'} and record evidence before completing the verification-gated milestone.`,
@@ -282,7 +283,7 @@ export function createSupervisorDecision(
     worker: snapshot.workers.implementer,
     requiresExternalExecution: true,
     documentPath: null,
-    documentKind: 'implementer.contract',
+    documentKind: 'managed-runner.launch-request',
     summary: verificationRetryContext.shouldRetryActiveMilestone
       ? verificationRetryContext.retrySummary ?? `Retry milestone ${activeMilestone?.id ?? 'unknown'} as a bounded step in the repo-native control loop without widening scope.`
       : snapshot.status === 'planned'
@@ -324,155 +325,79 @@ export function writeSupervisorBundle(
   }
 
   if (decision.decision === 'plan' || decision.decision === 'replan') {
-    const plannerRequest = createPlannerRequest(snapshot, {
-      requestedMode: decision.decision === 'replan' ? 'replan' : 'plan',
-      triggerReason: decision.reason,
+    const launchBundle = writeManagedRunnerLaunchBundle(resolvedOutputDir, snapshot, {
+      worker: 'planner',
+      runtimeProfile: decision.runtimeProfile,
+      backendCheck: preflightCheck ?? undefined,
     });
-    const plannerRequestPath = writeContractDocument(path.join(resolvedOutputDir, `${baseName}.planner-request.json`), plannerRequest);
-    const plannerSpawnPath = writeOpenClawAdapter(
-      path.join(resolvedOutputDir, `${baseName}.planner-spawn.json`),
-      createSessionSpawnAdapter(snapshot, {
-        worker: 'planner',
-        runtimeProfile: decision.runtimeProfile,
-        backendCheck: preflightCheck ?? undefined,
-      }),
-    );
-    const codexPlannerExecPath = writeBackendAdapter(
-      path.join(resolvedOutputDir, `${baseName}.codex-cli-planner-exec.json`),
-      createCodexCliExecAdapter(snapshot, {
-        worker: 'planner',
-        runtimeProfile: decision.runtimeProfile,
-        backendCheck: preflightCheck ?? undefined,
-      }),
-    );
-    const claudePlannerExecPath = writeBackendAdapter(
-      path.join(resolvedOutputDir, `${baseName}.claude-code-planner-exec.json`),
-      createClaudeCodeExecAdapter(snapshot, {
-        worker: 'planner',
-        runtimeProfile: decision.runtimeProfile,
-        backendCheck: preflightCheck ?? undefined,
-      }),
-    );
-    documents.plannerRequest = plannerRequestPath;
-    documents.plannerSpawn = plannerSpawnPath;
-    documents.codexPlannerExec = codexPlannerExecPath;
-    documents.claudePlannerExec = claudePlannerExecPath;
+    documents.plannerManagedRunnerRequest = launchBundle.launchRequestPath;
+    documents.plannerManagedRunnerLaunch = launchBundle.launchArtifactPath;
+    documents.plannerRequest = launchBundle.contractPath;
+    documents.plannerProviderAdapter = launchBundle.providerAdapterPath;
+    documents.plannerResultArtifact = launchBundle.resultArtifactPath;
     decision.actions = decision.actions.map((action) => ({
       ...action,
-      documentPath: action.kind === 'planner.request' ? plannerRequestPath : action.documentPath,
+      documentPath: action.id === 'planner-bootstrap' || action.id === 'planner-repair' ? launchBundle.launchRequestPath : action.documentPath,
+      documentKind: action.id === 'planner-bootstrap' || action.id === 'planner-repair' ? 'managed-runner.launch-request' : action.documentKind,
     }));
   }
 
   if (decision.decision === 'continue') {
-    const contract = createImplementerContract(snapshot);
-    const contractPath = writeContractDocument(path.join(resolvedOutputDir, `${baseName}.implementer-contract.json`), contract);
-    const spawnPath = writeOpenClawAdapter(
-      path.join(resolvedOutputDir, `${baseName}.implementer-spawn.json`),
-      createSessionSpawnAdapter(snapshot, {
-        worker: 'implementer',
-        runtimeProfile: decision.runtimeProfile,
-        backendCheck: preflightCheck ?? undefined,
-      }),
-    );
-    const codexExecPath = writeBackendAdapter(
-      path.join(resolvedOutputDir, `${baseName}.codex-cli-implementer-exec.json`),
-      createCodexCliExecAdapter(snapshot, {
-        worker: 'implementer',
-        runtimeProfile: decision.runtimeProfile,
-        backendCheck: preflightCheck ?? undefined,
-      }),
-    );
-    const claudeExecPath = writeBackendAdapter(
-      path.join(resolvedOutputDir, `${baseName}.claude-code-implementer-exec.json`),
-      createClaudeCodeExecAdapter(snapshot, {
-        worker: 'implementer',
-        runtimeProfile: decision.runtimeProfile,
-        backendCheck: preflightCheck ?? undefined,
-      }),
-    );
-    documents.implementerContract = contractPath;
-    documents.implementerSpawn = spawnPath;
-    documents.codexImplementerExec = codexExecPath;
-    documents.claudeImplementerExec = claudeExecPath;
+    const launchBundle = writeManagedRunnerLaunchBundle(resolvedOutputDir, snapshot, {
+      worker: 'implementer',
+      runtimeProfile: decision.runtimeProfile,
+      backendCheck: preflightCheck ?? undefined,
+    });
+    documents.implementerManagedRunnerRequest = launchBundle.launchRequestPath;
+    documents.implementerManagedRunnerLaunch = launchBundle.launchArtifactPath;
+    documents.implementerContract = launchBundle.contractPath;
+    documents.implementerProviderAdapter = launchBundle.providerAdapterPath;
+    documents.implementerResultArtifact = launchBundle.resultArtifactPath;
     decision.actions = decision.actions.map((action) => ({
       ...action,
-      documentPath: action.kind === 'implementer.contract' ? contractPath : action.documentPath,
+      documentPath: action.id === 'continue-implementer' ? launchBundle.launchRequestPath : action.documentPath,
+      documentKind: action.id === 'continue-implementer' ? 'managed-runner.launch-request' : action.documentKind,
     }));
   }
 
   if (decision.decision === 'recover') {
-    const recoveryPlan = createRecoveryPlan(snapshot, evaluateRunHealth(snapshot, {
-      now: options.now,
-      stallThresholdMinutes: options.stallThresholdMinutes,
-    }));
-    const recoveryPlanPath = writeRecoveryPlan(path.join(resolvedOutputDir, `${baseName}.recovery-plan.json`), recoveryPlan);
-    const recoverySpawnPath = writeOpenClawAdapter(
-      path.join(resolvedOutputDir, `${baseName}.recovery-spawn.json`),
-      createSessionSpawnAdapter(snapshot, {
-        worker: 'recovery',
-        healthOptions: { stallThresholdMinutes: options.stallThresholdMinutes },
-        runtimeProfile: decision.runtimeProfile,
-        backendCheck: preflightCheck ?? undefined,
-      }),
-    );
-    const codexRecoveryExecPath = writeBackendAdapter(
-      path.join(resolvedOutputDir, `${baseName}.codex-cli-recovery-exec.json`),
-      createCodexCliExecAdapter(snapshot, {
-        worker: 'recovery',
-        healthOptions: { now: options.now, stallThresholdMinutes: options.stallThresholdMinutes },
-        runtimeProfile: decision.runtimeProfile,
-        backendCheck: preflightCheck ?? undefined,
-      }),
-    );
-    const claudeRecoveryExecPath = writeBackendAdapter(
-      path.join(resolvedOutputDir, `${baseName}.claude-code-recovery-exec.json`),
-      createClaudeCodeExecAdapter(snapshot, {
-        worker: 'recovery',
-        healthOptions: { now: options.now, stallThresholdMinutes: options.stallThresholdMinutes },
-        runtimeProfile: decision.runtimeProfile,
-        backendCheck: preflightCheck ?? undefined,
-      }),
-    );
-    documents.recoveryPlan = recoveryPlanPath;
-    documents.recoverySpawn = recoverySpawnPath;
-    documents.codexRecoveryExec = codexRecoveryExecPath;
-    documents.claudeRecoveryExec = claudeRecoveryExecPath;
+    const launchBundle = writeManagedRunnerLaunchBundle(resolvedOutputDir, snapshot, {
+      worker: 'recovery',
+      runtimeProfile: decision.runtimeProfile,
+      healthOptions: {
+        now: options.now,
+        stallThresholdMinutes: options.stallThresholdMinutes,
+      },
+      backendCheck: preflightCheck ?? undefined,
+    });
+    documents.recoveryManagedRunnerRequest = launchBundle.launchRequestPath;
+    documents.recoveryManagedRunnerLaunch = launchBundle.launchArtifactPath;
+    documents.recoveryPlan = launchBundle.contractPath;
+    documents.recoveryProviderAdapter = launchBundle.providerAdapterPath;
+    documents.recoveryResultArtifact = launchBundle.resultArtifactPath;
     decision.actions = decision.actions.map((action) => ({
       ...action,
-      documentPath: action.kind === 'recovery.plan' ? recoveryPlanPath : action.documentPath,
+      documentPath: action.id === 'bounded-recovery' ? launchBundle.launchRequestPath : action.documentPath,
+      documentKind: action.id === 'bounded-recovery' ? 'managed-runner.launch-request' : action.documentKind,
     }));
   }
 
   if (decision.decision === 'verify') {
-    const verificationCommand = createVerificationCommand(snapshot, {
-      command: options.verificationCommand,
+    const launchBundle = writeManagedRunnerLaunchBundle(resolvedOutputDir, snapshot, {
+      worker: 'verifier',
+      runtimeProfile: decision.runtimeProfile,
+      verificationCommand: options.verificationCommand,
+      backendCheck: preflightCheck ?? undefined,
     });
-    const verificationCommandPath = writeVerificationDocument(
-      path.join(resolvedOutputDir, `${baseName}.verification-command.json`),
-      verificationCommand,
-    );
-    const codexVerifierExecPath = writeBackendAdapter(
-      path.join(resolvedOutputDir, `${baseName}.codex-cli-verifier-exec.json`),
-      createCodexCliExecAdapter(snapshot, {
-        worker: 'verifier',
-        runtimeProfile: decision.runtimeProfile,
-        backendCheck: preflightCheck ?? undefined,
-      }),
-    );
-    const claudeVerifierExecPath = writeBackendAdapter(
-      path.join(resolvedOutputDir, `${baseName}.claude-code-verifier-exec.json`),
-      createClaudeCodeExecAdapter(snapshot, {
-        worker: 'verifier',
-        runtimeProfile: decision.runtimeProfile,
-        backendCheck: preflightCheck ?? undefined,
-      }),
-    );
-    documents.verificationCommand = verificationCommandPath;
-    documents.codexVerifierExec = codexVerifierExecPath;
-    documents.claudeVerifierExec = claudeVerifierExecPath;
+    documents.verifierManagedRunnerRequest = launchBundle.launchRequestPath;
+    documents.verifierManagedRunnerLaunch = launchBundle.launchArtifactPath;
+    documents.verificationCommand = launchBundle.contractPath;
+    documents.verifierProviderAdapter = launchBundle.providerAdapterPath;
+    documents.verifierResultArtifact = launchBundle.resultArtifactPath;
     decision.actions = decision.actions.map((action) => ({
       ...action,
-      documentPath: action.kind === 'verification.command' ? verificationCommandPath : action.documentPath,
+      documentPath: action.id === 'run-verification' ? launchBundle.launchRequestPath : action.documentPath,
+      documentKind: action.id === 'run-verification' ? 'managed-runner.launch-request' : action.documentKind,
     }));
   }
 

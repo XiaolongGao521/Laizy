@@ -11,8 +11,21 @@ import {
   createVerificationResultRecord,
   hasRecordedVerificationEvidence,
 } from './verification.js';
+import {
+  createManagedRunnerResultArtifact,
+  readManagedRunnerLaunchArtifact,
+  summarizeManagedRunnerState,
+  updateManagedRunnerLaunchArtifact,
+  writeManagedRunnerLaunchArtifact,
+  writeManagedRunnerResultArtifact,
+} from './managed-runner.js';
 
 import type {
+  ManagedRunnerArtifactReference,
+  ManagedRunnerLaunchArtifact,
+  ManagedRunnerOutcome,
+  ManagedRunnerResultArtifact,
+  ManagedRunnerTrackingHandle,
   ReviewerOutput,
   RunEvent,
   RunSnapshot,
@@ -117,6 +130,7 @@ export function summarizeEventDerivedState(snapshot: RunSnapshot) {
   const activeMilestone = snapshot.milestones.find((milestone) => milestone.id === snapshot.currentMilestoneId) ?? null;
   const latestRecovery = snapshot.recovery.length > 0 ? snapshot.recovery[snapshot.recovery.length - 1] : null;
   const verificationRetryContext = deriveVerificationRetryContext(snapshot, activeMilestone?.id ?? null);
+  const managedRunnerState = summarizeManagedRunnerState(snapshot, 'implementer', activeMilestone?.id ?? null);
 
   return {
     source: 'snapshot' as const,
@@ -150,6 +164,31 @@ export function summarizeEventDerivedState(snapshot: RunSnapshot) {
         milestoneId: latestRecovery.milestoneId,
       }
       : null,
+    latestManagedRunner: {
+      launch: managedRunnerState.launch
+        ? {
+          launchId: managedRunnerState.launch.launchId,
+          provider: managedRunnerState.launch.provider,
+          status: managedRunnerState.launch.status,
+          tracking: managedRunnerState.launch.tracking,
+          requestedAt: managedRunnerState.launch.requestedAt,
+          startedAt: managedRunnerState.launch.startedAt,
+          outcome: managedRunnerState.launch.outcome,
+          artifactPath: managedRunnerState.launch.artifactPath,
+        }
+        : null,
+      result: managedRunnerState.result
+        ? {
+          launchId: managedRunnerState.result.launchId,
+          provider: managedRunnerState.result.provider,
+          status: managedRunnerState.result.status,
+          outcome: managedRunnerState.result.outcome,
+          exitCode: managedRunnerState.result.exitCode,
+          endedAt: managedRunnerState.result.endedAt,
+          artifactPath: managedRunnerState.result.artifactPath,
+        }
+        : null,
+    },
   };
 }
 
@@ -258,6 +297,22 @@ export function createVerificationRecordedEvent({
     type: 'verification.recorded',
     at: new Date().toISOString(),
     detail: record,
+  };
+}
+
+export function createManagedRunnerLaunchRecordedEvent(launch: ManagedRunnerLaunchArtifact): RunEvent {
+  return {
+    type: 'managed-runner.launch-recorded',
+    at: new Date().toISOString(),
+    detail: clone(launch) as Record<string, unknown>,
+  };
+}
+
+export function createManagedRunnerResultRecordedEvent(result: ManagedRunnerResultArtifact): RunEvent {
+  return {
+    type: 'managed-runner.result-recorded',
+    at: new Date().toISOString(),
+    detail: clone(result) as Record<string, unknown>,
   };
 }
 
@@ -415,6 +470,41 @@ function applyEvent(snapshot: RunSnapshot & { eventCount: number; lastEventAt: s
     });
   }
 
+  if (event.type === 'managed-runner.launch-recorded') {
+    const launch = clone(event.detail as ManagedRunnerLaunchArtifact);
+    const existingLaunchIndex = snapshot.managedRunners.launches.findIndex((candidate) => candidate.launchId === launch.launchId);
+
+    if (existingLaunchIndex >= 0) {
+      snapshot.managedRunners.launches[existingLaunchIndex] = launch;
+    } else {
+      snapshot.managedRunners.launches.push(launch);
+    }
+  }
+
+  if (event.type === 'managed-runner.result-recorded') {
+    const result = clone(event.detail as ManagedRunnerResultArtifact);
+    const existingResultIndex = snapshot.managedRunners.results.findIndex((candidate) => candidate.launchId === result.launchId);
+
+    if (existingResultIndex >= 0) {
+      snapshot.managedRunners.results[existingResultIndex] = result;
+    } else {
+      snapshot.managedRunners.results.push(result);
+    }
+
+    const launch = snapshot.managedRunners.launches.find((candidate) => candidate.launchId === result.launchId);
+    if (launch) {
+      launch.status = result.status;
+      launch.outcome = result.outcome;
+      launch.startedAt = result.startedAt;
+      launch.endedAt = result.endedAt;
+      launch.tracking = result.tracking;
+      launch.stdoutPath = result.stdoutPath;
+      launch.stderrPath = result.stderrPath;
+      launch.summary = result.summary;
+      launch.artifacts = clone(result.artifacts);
+    }
+  }
+
   snapshot.updatedAt = event.at;
   snapshot.lastEventAt = event.at;
   snapshot.eventCount += 1;
@@ -436,6 +526,10 @@ export function materializeRunSnapshot(
   const seed = clone(initialized.detail.run as RunSnapshot);
   const snapshot: RunSnapshot & { eventCount: number; lastEventAt: string | null } = {
     ...seed,
+    managedRunners: seed.managedRunners ?? {
+      launches: [],
+      results: [],
+    },
     snapshotPath: snapshotPath ? path.resolve(snapshotPath) : null,
     eventLogPath: eventLogPath ? path.resolve(eventLogPath) : null,
     eventCount: 0,
@@ -574,5 +668,180 @@ export function recordVerificationResult(
   return {
     ...rebuilt,
     event,
+  };
+}
+
+function mergeArtifactReferences(...referenceSets: ManagedRunnerArtifactReference[][]): ManagedRunnerArtifactReference[] {
+  const seen = new Set<string>();
+  const merged: ManagedRunnerArtifactReference[] = [];
+
+  for (const referenceSet of referenceSets) {
+    for (const reference of referenceSet) {
+      const comparisonKey = `${reference.label}:${reference.path}`;
+      if (seen.has(comparisonKey)) {
+        continue;
+      }
+
+      seen.add(comparisonKey);
+      merged.push(reference);
+    }
+  }
+
+  return merged;
+}
+
+export function recordManagedRunnerLaunch(
+  snapshotPath: string,
+  {
+    launchArtifactPath,
+    status = 'running',
+    outcome,
+    tracking,
+    startedAt,
+    endedAt,
+    stdoutPath,
+    stderrPath,
+    summary,
+  }: {
+    launchArtifactPath: string;
+    status?: ManagedRunnerLaunchArtifact['status'];
+    outcome?: ManagedRunnerOutcome | null;
+    tracking?: ManagedRunnerTrackingHandle | null;
+    startedAt?: string;
+    endedAt?: string;
+    stdoutPath?: string;
+    stderrPath?: string;
+    summary?: string;
+  },
+) {
+  const resolvedSnapshotPath = path.resolve(snapshotPath);
+  const resolvedEventLogPath = eventLogPathForSnapshot(resolvedSnapshotPath);
+  const launchArtifact = readManagedRunnerLaunchArtifact(launchArtifactPath);
+  const updatedLaunchArtifact = updateManagedRunnerLaunchArtifact(launchArtifact, {
+    status,
+    outcome: outcome ?? launchArtifact.outcome,
+    tracking: tracking ?? null,
+    startedAt: startedAt ?? null,
+    endedAt: endedAt ?? null,
+    stdoutPath: stdoutPath ?? null,
+    stderrPath: stderrPath ?? null,
+    summary: summary ?? null,
+    artifacts: mergeArtifactReferences(
+      launchArtifact.artifacts,
+      [
+        ...(stdoutPath ? [{ label: 'stdout', path: path.resolve(stdoutPath) }] : []),
+        ...(stderrPath ? [{ label: 'stderr', path: path.resolve(stderrPath) }] : []),
+      ],
+    ),
+  });
+  const writtenLaunchArtifactPath = writeManagedRunnerLaunchArtifact(launchArtifactPath, updatedLaunchArtifact);
+  const event = createManagedRunnerLaunchRecordedEvent({
+    ...updatedLaunchArtifact,
+    artifactPath: writtenLaunchArtifactPath,
+  });
+
+  appendRunEvent(resolvedEventLogPath, event);
+  const rebuilt = rebuildSnapshot(resolvedSnapshotPath);
+
+  return {
+    ...rebuilt,
+    event,
+    launchArtifact: {
+      ...updatedLaunchArtifact,
+      artifactPath: writtenLaunchArtifactPath,
+    },
+  };
+}
+
+export function recordManagedRunnerResult(
+  snapshotPath: string,
+  {
+    launchArtifactPath,
+    resultArtifactPath,
+    outcome,
+    exitCode,
+    status = 'finished',
+    tracking,
+    startedAt,
+    endedAt,
+    stdoutPath,
+    stderrPath,
+    summary,
+  }: {
+    launchArtifactPath: string;
+    resultArtifactPath?: string;
+    outcome: ManagedRunnerOutcome;
+    exitCode?: number | null;
+    status?: ManagedRunnerResultArtifact['status'];
+    tracking?: ManagedRunnerTrackingHandle | null;
+    startedAt?: string;
+    endedAt?: string;
+    stdoutPath?: string;
+    stderrPath?: string;
+    summary?: string;
+  },
+) {
+  const resolvedSnapshotPath = path.resolve(snapshotPath);
+  const resolvedEventLogPath = eventLogPathForSnapshot(resolvedSnapshotPath);
+  const launchArtifact = readManagedRunnerLaunchArtifact(launchArtifactPath);
+  const resolvedResultArtifactPath = path.resolve(resultArtifactPath ?? launchArtifact.resultPath ?? `${launchArtifactPath}.result.json`);
+  const resultArtifact = createManagedRunnerResultArtifact(launchArtifact, {
+    outcome,
+    exitCode: exitCode ?? null,
+    status,
+    tracking: tracking ?? launchArtifact.tracking,
+    startedAt: startedAt ?? launchArtifact.startedAt,
+    endedAt: endedAt,
+    stdoutPath: stdoutPath ?? launchArtifact.stdoutPath,
+    stderrPath: stderrPath ?? launchArtifact.stderrPath,
+    summary: summary ?? launchArtifact.summary,
+    artifacts: mergeArtifactReferences(
+      launchArtifact.artifacts,
+      [
+        { label: 'launch', path: path.resolve(launchArtifactPath) },
+        { label: 'result', path: resolvedResultArtifactPath },
+        ...(stdoutPath || launchArtifact.stdoutPath
+          ? [{ label: 'stdout', path: path.resolve(stdoutPath ?? launchArtifact.stdoutPath!) }]
+          : []),
+        ...(stderrPath || launchArtifact.stderrPath
+          ? [{ label: 'stderr', path: path.resolve(stderrPath ?? launchArtifact.stderrPath!) }]
+          : []),
+      ],
+    ),
+  });
+  const writtenResultArtifactPath = writeManagedRunnerResultArtifact(resolvedResultArtifactPath, resultArtifact);
+  const updatedLaunchArtifact = updateManagedRunnerLaunchArtifact(launchArtifact, {
+    status,
+    outcome,
+    tracking: resultArtifact.tracking,
+    startedAt: resultArtifact.startedAt,
+    endedAt: resultArtifact.endedAt,
+    stdoutPath: resultArtifact.stdoutPath ?? null,
+    stderrPath: resultArtifact.stderrPath ?? null,
+    summary: resultArtifact.summary ?? null,
+    artifacts: resultArtifact.artifacts,
+  });
+  const writtenLaunchArtifactPath = writeManagedRunnerLaunchArtifact(launchArtifactPath, updatedLaunchArtifact);
+  const event = createManagedRunnerResultRecordedEvent({
+    ...resultArtifact,
+    artifactPath: writtenResultArtifactPath,
+    launchPath: writtenLaunchArtifactPath,
+  });
+
+  appendRunEvent(resolvedEventLogPath, event);
+  const rebuilt = rebuildSnapshot(resolvedSnapshotPath);
+
+  return {
+    ...rebuilt,
+    event,
+    launchArtifact: {
+      ...updatedLaunchArtifact,
+      artifactPath: writtenLaunchArtifactPath,
+    },
+    resultArtifact: {
+      ...resultArtifact,
+      artifactPath: writtenResultArtifactPath,
+      launchPath: writtenLaunchArtifactPath,
+    },
   };
 }

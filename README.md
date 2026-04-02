@@ -54,9 +54,16 @@ A typical run produces:
 - `state/runs/<run>.events.jsonl` — append-only event log
 - `state/runs/<run>.bootstrap/` — initial bundle from `start-run`
 - `state/runs/<run>.supervisor/` — next-action bundle from `supervisor-tick`
+- `state/runs/<run>.managed-runners/` or bundle-local `*.managed-runner-*.json` artifacts — tracked worker launch/request/result records
 - `state/verification/` — reviewer and verification artifacts when used
 
 These files make it possible to inspect, pause, resume, and recover the loop without reconstructing state from memory.
+
+Managed-runner artifacts are the durable bridge between a bounded Laizy contract and a specific backend worker launch:
+
+- the launch request tells an operator or wrapper exactly which provider should start exactly one worker
+- the launch artifact records the tracked handle once the worker is actually running
+- the result artifact records normalized terminal outcome data before verification or milestone completion is considered
 
 ## Supervisor decisions
 
@@ -102,6 +109,26 @@ Across all of those adapters, the operator guidance should stay the same:
 Backend preflight artifacts are also emitted so worker handoff can fail early when a configured runtime is unavailable.
 
 These adapter documents are intentionally thin and replaceable: they restate durable control-loop intent for a specific runtime without pushing backend-specific concerns into the run snapshot schema.
+
+## Managed runners
+
+Laizy now emits a provider-neutral managed-runner handoff for bounded worker execution.
+
+That layer keeps one launch paired with one tracked handle and one normalized terminal result across:
+
+- `openclaw`
+- `codex`
+- `claude-code`
+
+The intended lifecycle is:
+
+1. supervisor/bootstrap emits a `managed-runner.launch-request`
+2. the launch request points at the bounded contract plus one provider adapter
+3. the provider records a tracked handle in `managed-runner.launch`
+4. the provider writes `managed-runner.result` on terminal completion
+5. Laizy uses that result to decide verification, recovery, or closeout
+
+That keeps worker completion explicit and durable without conflating it with verification or milestone completion.
 
 ### Backend configuration overrides
 

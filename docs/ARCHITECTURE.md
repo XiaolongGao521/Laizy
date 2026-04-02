@@ -138,6 +138,28 @@ The operator-facing guidance carried by those adapters should stay aligned:
 
 Adapter payloads may carry operator guidance and runtime-profile summaries, but those remain thin transport hints generated from durable state rather than new run-state schema.
 
+### Managed-runner documents
+
+The managed-runner layer sits between a bounded worker contract and the provider-specific adapter.
+
+It adds three durable artifact types:
+
+- `managed-runner.launch-request` — the authoritative handoff document for starting exactly one bounded worker
+- `managed-runner.launch` — the launch record that binds run, milestone, provider, and tracked handle
+- `managed-runner.result` — the normalized terminal result that records worker completion before verification/milestone completion
+
+That lets Laizy keep the control plane provider-agnostic while still making launch and completion explicit for:
+
+- `openclaw`
+- `codex`
+- `claude-code`
+
+The important separation is intentional:
+
+- worker launch/completion is recorded through managed-runner artifacts
+- verification is still a separate gate with its own evidence
+- milestone completion still requires an explicit verified transition in run state
+
 ## Verification gate
 
 Verification is not an afterthought in the current architecture.

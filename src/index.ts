@@ -14,6 +14,8 @@ import {
 import {
   initializeRunArtifacts,
   rebuildSnapshot,
+  recordManagedRunnerLaunch,
+  recordManagedRunnerResult,
   recordRecoveryAction,
   recordVerificationResult,
   recordWorkerHeartbeat,
@@ -45,6 +47,7 @@ import {
   createLaizyWatchdogAdapter,
   writeBackendAdapter,
 } from './core/backends.js';
+import { writeManagedRunnerLaunchBundle } from './core/managed-runner.js';
 import {
   assertHealthyBackendCheck,
   createBackendCheckResult,
@@ -97,6 +100,9 @@ Usage:
   node dist/src/index.js emit-openclaw-cron --snapshot <snapshot-path> [--worker <watchdog|planner|recovery>] [--schedule <cron>] [--prompt <text>] [--job-label <label>] [--out <path>]
   node dist/src/index.js emit-codex-cli-exec --snapshot <snapshot-path> [--worker <implementer|recovery|watchdog|planner|verifier>] [--milestone <id>] [--out <path>]
   node dist/src/index.js emit-claude-code-exec --snapshot <snapshot-path> [--worker <implementer|recovery|watchdog|planner|verifier>] [--milestone <id>] [--out <path>]
+  node dist/src/index.js emit-managed-runner-launch --snapshot <snapshot-path> [--worker <implementer|recovery|planner|verifier>] [--provider <codex|claude-code|openclaw>] [--milestone <id>] [--runtime <value>] [--verification-command <text>] [--out-dir <dir>]
+  node dist/src/index.js record-managed-runner-launch --snapshot <snapshot-path> --launch-artifact <path> [--status <launching|running|finished>] [--tracking-kind <pid|exec-session|session-key>] [--tracking-id <id>] [--stdout-path <path>] [--stderr-path <path>] [--summary <text>]
+  node dist/src/index.js record-managed-runner-result --snapshot <snapshot-path> --launch-artifact <path> --outcome <succeeded|failed|timed_out|cancelled|launch_failed|unknown> [--result-artifact <path>] [--exit-code <n>] [--tracking-kind <pid|exec-session|session-key>] [--tracking-id <id>] [--stdout-path <path>] [--stderr-path <path>] [--summary <text>]
   node dist/src/index.js emit-laizy-watchdog --snapshot <snapshot-path> [--out-dir <dir>] [--interval-seconds <n>] [--stall-threshold-minutes <n>] [--verification-command <text>] [--mode <ensure|disable>] [--out <path>]
   node dist/src/index.js emit-backend-check --snapshot <snapshot-path> [--worker <implementer|recovery|watchdog|planner|verifier>] [--out <path>]
   node dist/src/index.js emit-verification-command --snapshot <snapshot-path> [--milestone <id>] [--command <text>] [--stage <value>] [--out <path>]
@@ -105,7 +111,7 @@ Usage:
 
 Notes:
   - Keep command names stable; use start-run once, then supervisor-tick as the source of truth.
-  - Read emitted contracts/bundles instead of improvising the next step from chat memory.
+  - Read emitted managed-runner launch requests and supervisor bundles instead of improvising the next step from chat memory.
   - Complete milestones only after verification is recorded.
 `);
 }
@@ -143,6 +149,17 @@ function requireOption(options: CliOptions, key: string): string {
     throw new Error(`Missing required option --${key}`);
   }
   return String(value);
+}
+
+function parseOptionalTrackingHandle(options: CliOptions) {
+  if (typeof options['tracking-kind'] !== 'string' || typeof options['tracking-id'] !== 'string') {
+    return null;
+  }
+
+  return {
+    kind: options['tracking-kind'] as 'pid' | 'exec-session' | 'session-key',
+    id: options['tracking-id'],
+  };
 }
 
 function parseJsonOption(value: string): unknown {
@@ -314,39 +331,19 @@ async function main() {
         outputPath: path.join(bundleDir, 'planner.backend-check.json'),
       });
       const plannerBackendCheckPath = writeBackendCheckResult(plannerBackendCheck.outputPath ?? path.join(bundleDir, 'planner.backend-check.json'), plannerBackendCheck);
-      const plannerRequest = createPlannerRequest(snapshot);
       assertHealthyBackendCheck({ ...plannerBackendCheck, outputPath: plannerBackendCheckPath }, {
         context: 'start-run cannot emit planner adapters',
       });
-      const plannerRequestPath = writeContractDocument(path.join(bundleDir, 'planner-request.json'), plannerRequest);
-      const openClawPlannerSpawnPath = writeOpenClawAdapter(
-        path.join(bundleDir, 'openclaw-planner-spawn.json'),
-        createSessionSpawnAdapter(snapshot, {
-          worker: 'planner',
-          runtimeProfile: plannerRuntimeProfile,
-          backendCheck: { ...plannerBackendCheck, outputPath: plannerBackendCheckPath },
-        }),
-      );
-      const codexPlannerExecPath = writeBackendAdapter(
-        path.join(bundleDir, 'codex-cli-planner-exec.json'),
-        createCodexCliExecAdapter(snapshot, {
-          worker: 'planner',
-          runtimeProfile: plannerRuntimeProfile,
-          backendCheck: { ...plannerBackendCheck, outputPath: plannerBackendCheckPath },
-        }),
-      );
-      const claudePlannerExecPath = writeBackendAdapter(
-        path.join(bundleDir, 'claude-code-planner-exec.json'),
-        createClaudeCodeExecAdapter(snapshot, {
-          worker: 'planner',
-          runtimeProfile: plannerRuntimeProfile,
-          backendCheck: { ...plannerBackendCheck, outputPath: plannerBackendCheckPath },
-        }),
-      );
-      documents.plannerRequest = plannerRequestPath;
-      documents.openClawPlannerSpawn = openClawPlannerSpawnPath;
-      documents.codexPlannerExec = codexPlannerExecPath;
-      documents.claudePlannerExec = claudePlannerExecPath;
+      const launchBundle = writeManagedRunnerLaunchBundle(bundleDir, snapshot, {
+        worker: 'planner',
+        runtimeProfile: plannerRuntimeProfile,
+        backendCheck: { ...plannerBackendCheck, outputPath: plannerBackendCheckPath },
+      });
+      documents.plannerManagedRunnerRequest = launchBundle.launchRequestPath;
+      documents.plannerManagedRunnerLaunch = launchBundle.launchArtifactPath;
+      documents.plannerRequest = launchBundle.contractPath;
+      documents.plannerProviderAdapter = launchBundle.providerAdapterPath;
+      documents.plannerResultArtifact = launchBundle.resultArtifactPath;
       documents.plannerBackendCheck = plannerBackendCheckPath;
     } else {
       const implementerRuntimeProfile = selectSupervisorRuntimeProfile(snapshot, 'continue');
@@ -361,34 +358,17 @@ async function main() {
       assertHealthyBackendCheck({ ...implementerBackendCheck, outputPath: implementerBackendCheckPath }, {
         context: 'start-run cannot emit implementer adapters',
       });
-      const implementerSpawn = createSessionSpawnAdapter(snapshot, {
+      const launchBundle = writeManagedRunnerLaunchBundle(bundleDir, snapshot, {
         worker: 'implementer',
         runtime: typeof options.runtime === 'string' ? options.runtime : undefined,
         runtimeProfile: implementerRuntimeProfile,
         backendCheck: { ...implementerBackendCheck, outputPath: implementerBackendCheckPath },
       });
-      const implementerContractPath = writeContractDocument(path.join(bundleDir, 'implementer-contract.json'), implementerContract);
-      const implementerSpawnPath = writeOpenClawAdapter(path.join(bundleDir, 'openclaw-implementer-spawn.json'), implementerSpawn);
-      const codexImplementerExecPath = writeBackendAdapter(
-        path.join(bundleDir, 'codex-cli-implementer-exec.json'),
-        createCodexCliExecAdapter(snapshot, {
-          worker: 'implementer',
-          runtimeProfile: implementerRuntimeProfile,
-          backendCheck: { ...implementerBackendCheck, outputPath: implementerBackendCheckPath },
-        }),
-      );
-      const claudeImplementerExecPath = writeBackendAdapter(
-        path.join(bundleDir, 'claude-code-implementer-exec.json'),
-        createClaudeCodeExecAdapter(snapshot, {
-          worker: 'implementer',
-          runtimeProfile: implementerRuntimeProfile,
-          backendCheck: { ...implementerBackendCheck, outputPath: implementerBackendCheckPath },
-        }),
-      );
-      documents.implementerContract = implementerContractPath;
-      documents.implementerSpawn = implementerSpawnPath;
-      documents.codexImplementerExec = codexImplementerExecPath;
-      documents.claudeImplementerExec = claudeImplementerExecPath;
+      documents.implementerManagedRunnerRequest = launchBundle.launchRequestPath;
+      documents.implementerManagedRunnerLaunch = launchBundle.launchArtifactPath;
+      documents.implementerContract = launchBundle.contractPath;
+      documents.implementerProviderAdapter = launchBundle.providerAdapterPath;
+      documents.implementerResultArtifact = launchBundle.resultArtifactPath;
       documents.implementerBackendCheck = implementerBackendCheckPath;
     }
 
@@ -811,6 +791,79 @@ async function main() {
     }
 
     console.log(JSON.stringify(document, null, 2));
+    return;
+  }
+
+  if (command === 'emit-managed-runner-launch') {
+    const snapshotPath = requireOption(options, 'snapshot');
+    const rebuilt = rebuildSnapshot(snapshotPath);
+    rebuilt.snapshot.backends = resolveBackendConfigurationOption(options, rebuilt.snapshot.backends);
+    const outputDir = typeof options['out-dir'] === 'string'
+      ? options['out-dir']
+      : path.join(path.dirname(rebuilt.snapshotPath), `${path.basename(rebuilt.snapshotPath, '.json')}.managed-runners`);
+    const launchBundle = writeManagedRunnerLaunchBundle(outputDir, rebuilt.snapshot, {
+      worker: typeof options.worker === 'string' ? options.worker as 'implementer' | 'recovery' | 'planner' | 'verifier' : undefined,
+      provider: typeof options.provider === 'string' ? options.provider as 'codex' | 'claude-code' | 'openclaw' : undefined,
+      milestoneId: typeof options.milestone === 'string' ? options.milestone : undefined,
+      runtime: typeof options.runtime === 'string' ? options.runtime : undefined,
+      verificationCommand: typeof options['verification-command'] === 'string' ? options['verification-command'] : undefined,
+    });
+
+    console.log(JSON.stringify({
+      launchId: launchBundle.launchRequest.launchId,
+      provider: launchBundle.launchRequest.provider,
+      worker: launchBundle.launchRequest.worker.label,
+      launchRequestPath: launchBundle.launchRequestPath,
+      launchArtifactPath: launchBundle.launchArtifactPath,
+      contractPath: launchBundle.contractPath,
+      providerAdapterPath: launchBundle.providerAdapterPath,
+      resultArtifactPath: launchBundle.resultArtifactPath,
+    }, null, 2));
+    return;
+  }
+
+  if (command === 'record-managed-runner-launch') {
+    const snapshotPath = requireOption(options, 'snapshot');
+    const launchArtifactPath = requireOption(options, 'launch-artifact');
+    const updated = recordManagedRunnerLaunch(snapshotPath, {
+      launchArtifactPath,
+      status: typeof options.status === 'string' ? options.status as 'launching' | 'running' | 'finished' : undefined,
+      tracking: parseOptionalTrackingHandle(options),
+      stdoutPath: typeof options['stdout-path'] === 'string' ? options['stdout-path'] : undefined,
+      stderrPath: typeof options['stderr-path'] === 'string' ? options['stderr-path'] : undefined,
+      summary: typeof options.summary === 'string' ? options.summary : undefined,
+    });
+
+    console.log(JSON.stringify({
+      snapshotPath: updated.snapshotPath,
+      eventLogPath: updated.eventLogPath,
+      event: updated.event,
+      launchArtifact: updated.launchArtifact,
+    }, null, 2));
+    return;
+  }
+
+  if (command === 'record-managed-runner-result') {
+    const snapshotPath = requireOption(options, 'snapshot');
+    const launchArtifactPath = requireOption(options, 'launch-artifact');
+    const updated = recordManagedRunnerResult(snapshotPath, {
+      launchArtifactPath,
+      resultArtifactPath: typeof options['result-artifact'] === 'string' ? options['result-artifact'] : undefined,
+      outcome: requireOption(options, 'outcome') as 'succeeded' | 'failed' | 'timed_out' | 'cancelled' | 'launch_failed' | 'unknown',
+      exitCode: typeof options['exit-code'] === 'string' ? Number(options['exit-code']) : undefined,
+      tracking: parseOptionalTrackingHandle(options),
+      stdoutPath: typeof options['stdout-path'] === 'string' ? options['stdout-path'] : undefined,
+      stderrPath: typeof options['stderr-path'] === 'string' ? options['stderr-path'] : undefined,
+      summary: typeof options.summary === 'string' ? options.summary : undefined,
+    });
+
+    console.log(JSON.stringify({
+      snapshotPath: updated.snapshotPath,
+      eventLogPath: updated.eventLogPath,
+      event: updated.event,
+      launchArtifact: updated.launchArtifact,
+      resultArtifact: updated.resultArtifact,
+    }, null, 2));
     return;
   }
 

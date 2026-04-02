@@ -10,29 +10,55 @@ function assert(condition, message) {
   }
 }
 
+function shellEscape(value) {
+  return JSON.stringify(String(value));
+}
+
 function run(command, args) {
-  const result = spawnSync(command, args, {
+  const captureDir = mkdtempSync(path.join(os.tmpdir(), 'laizy-build-capture-'));
+  const stdoutPath = path.join(captureDir, 'stdout.txt');
+  const stderrPath = path.join(captureDir, 'stderr.txt');
+  const invocation = [command, ...args].map(shellEscape).join(' ');
+  const result = spawnSync('/usr/bin/env', ['bash', '-lc', `${invocation} > ${shellEscape(stdoutPath)} 2> ${shellEscape(stderrPath)}`], {
     cwd: process.cwd(),
     encoding: 'utf8',
     env: process.env,
   });
+  const stdout = readFileSync(stdoutPath, 'utf8');
+  const stderr = readFileSync(stderrPath, 'utf8');
+  rmSync(captureDir, { recursive: true, force: true });
 
   if (result.status !== 0) {
-    throw new Error(result.stderr || result.stdout || `${command} ${args.join(' ')} failed`);
+    throw new Error(stderr || stdout || `${command} ${args.join(' ')} failed`);
   }
 
-  return result;
+  return {
+    ...result,
+    stdout,
+    stderr,
+  };
 }
 
 function runExpectFailure(command, args) {
-  const result = spawnSync(command, args, {
+  const captureDir = mkdtempSync(path.join(os.tmpdir(), 'laizy-build-capture-'));
+  const stdoutPath = path.join(captureDir, 'stdout.txt');
+  const stderrPath = path.join(captureDir, 'stderr.txt');
+  const invocation = [command, ...args].map(shellEscape).join(' ');
+  const result = spawnSync('/usr/bin/env', ['bash', '-lc', `${invocation} > ${shellEscape(stdoutPath)} 2> ${shellEscape(stderrPath)}`], {
     cwd: process.cwd(),
     encoding: 'utf8',
     env: process.env,
   });
+  const stdout = readFileSync(stdoutPath, 'utf8');
+  const stderr = readFileSync(stderrPath, 'utf8');
+  rmSync(captureDir, { recursive: true, force: true });
 
   assert(result.status !== 0, `expected ${command} ${args.join(' ')} to fail`);
-  return result;
+  return {
+    ...result,
+    stdout,
+    stderr,
+  };
 }
 
 function importBuiltModule(relativePath) {
@@ -66,6 +92,7 @@ run(process.execPath, ['--check', 'dist/src/core/backend-preflight.js']);
 run(process.execPath, ['--check', 'dist/src/core/runtime-profile.js']);
 run(process.execPath, ['--check', 'dist/src/core/verification.js']);
 run(process.execPath, ['--check', 'dist/src/core/supervisor.js']);
+run(process.execPath, ['--check', 'dist/src/core/managed-runner.js']);
 
 const [
   backendsModule,
@@ -76,6 +103,7 @@ const [
   planModule,
   recoveryModule,
   openClawModule,
+  managedRunnerModule,
   runStateModule,
   runtimeProfileModule,
   verificationModule,
@@ -89,6 +117,7 @@ const [
   importBuiltModule('dist/src/core/plan.js'),
   importBuiltModule('dist/src/core/recovery.js'),
   importBuiltModule('dist/src/core/openclaw.js'),
+  importBuiltModule('dist/src/core/managed-runner.js'),
   importBuiltModule('dist/src/core/run-state.js'),
   importBuiltModule('dist/src/core/runtime-profile.js'),
   importBuiltModule('dist/src/core/verification.js'),
@@ -118,6 +147,8 @@ const {
   eventLogPathForSnapshot,
   initializeRunArtifacts,
   loadRunEvents,
+  recordManagedRunnerLaunch,
+  recordManagedRunnerResult,
   recordRecoveryAction,
   recordVerificationResult,
   recordWorkerHeartbeat,
@@ -133,6 +164,11 @@ const {
   createSessionSpawnAdapter,
   writeOpenClawAdapter,
 } = openClawModule;
+const {
+  readManagedRunnerLaunchArtifact,
+  resolveManagedRunnerProvider,
+  writeManagedRunnerLaunchBundle,
+} = managedRunnerModule;
 const { createRunState } = runStateModule;
 const { classifyMilestoneScope, selectSupervisorRuntimeProfile } = runtimeProfileModule;
 const {
@@ -246,6 +282,10 @@ assert(defaultBackendConfiguration.planner.supportedBackends.includes('codex-cli
 assert(defaultBackendConfiguration.recovery.supportedBackends.includes('claude-code'), 'expected recovery role to support claude-code configuration');
 assert(defaultBackendConfiguration.watchdog.supportedBackends.includes('laizy-watchdog'), 'expected watchdog role to support the local laizy watchdog');
 assert(resolveBackendConfiguration(initialized.snapshot).verifier.backend === 'openclaw', 'expected snapshot backend configuration to resolve from run state');
+assert(resolveManagedRunnerProvider('openclaw') === 'openclaw', 'expected managed-runner provider mapping for openclaw backend');
+assert(resolveManagedRunnerProvider('codex-cli') === 'codex', 'expected managed-runner provider mapping for codex backend');
+assert(resolveManagedRunnerProvider('claude-code') === 'claude-code', 'expected managed-runner provider mapping for claude-code backend');
+assert(resolveManagedRunnerProvider('laizy-watchdog') === null, 'expected local watchdog backend to stay outside the managed-runner provider set');
 
 const plannerRequest = createPlannerRequest(initialized.snapshot);
 assert(plannerRequest.kind === 'planner.request', 'expected planner request document kind');
@@ -375,6 +415,28 @@ const spawnAdapterPath = writeOpenClawAdapter(path.join(tempDir, 'adapters', 'sp
 const persistedSpawnAdapter = JSON.parse(readFileSync(spawnAdapterPath, 'utf8'));
 assert(persistedSpawnAdapter.payload.sessionLabel === 'laizy-implementer', 'expected persisted spawn adapter to remain machine-readable');
 
+const managedRunnerBundle = writeManagedRunnerLaunchBundle(path.join(tempDir, 'managed-runner'), initialized.snapshot, {
+  worker: 'implementer',
+});
+const managedRunnerLaunch = readManagedRunnerLaunchArtifact(managedRunnerBundle.launchArtifactPath);
+assert(managedRunnerBundle.launchRequest.kind === 'managed-runner.launch-request', 'expected managed-runner launch bundle to emit a launch request');
+assert(managedRunnerLaunch.kind === 'managed-runner.launch', 'expected managed-runner launch bundle to emit a launch artifact');
+assert(managedRunnerLaunch.provider === 'openclaw', 'expected managed-runner launch bundle to default to the configured implementer provider');
+assert(managedRunnerLaunch.contract.kind === 'implementer.contract', 'expected managed-runner launch artifact to point at the bounded implementer contract');
+assert(managedRunnerLaunch.adapter.kind === 'openclaw.sessions_spawn', 'expected managed-runner launch artifact to point at the provider adapter');
+const managedRunnerLaunchRecord = recordManagedRunnerLaunch(snapshotPath, {
+  launchArtifactPath: managedRunnerBundle.launchArtifactPath,
+  tracking: {
+    kind: 'session-key',
+    id: 'implementer-session-1',
+  },
+  stdoutPath: path.join(tempDir, 'managed-runner', 'implementer.stdout.log'),
+  stderrPath: path.join(tempDir, 'managed-runner', 'implementer.stderr.log'),
+  summary: 'Managed implementer launch is now running.',
+});
+assert(managedRunnerLaunchRecord.snapshot.managedRunners.launches.length === 1, 'expected managed-runner launch recording to persist into snapshot state');
+assert(managedRunnerLaunchRecord.snapshot.managedRunners.launches[0]?.tracking?.id === 'implementer-session-1', 'expected managed-runner launch tracking handle to persist');
+
 const cliBootstrapSnapshotPath = path.join(tempDir, 'cli-run.json');
 const startRunResult = run(process.execPath, [
   'dist/src/index.js',
@@ -414,10 +476,16 @@ assert(readmeSource.includes('tools.exec.pathPrepend'), 'expected README fresh-i
 assert(readmeSource.includes('openclaw approvals allowlist add --agent main'), 'expected README fresh-install guidance to include explicit OpenClaw allowlist examples');
 assert(readmeSource.includes('do **not** put `node`, `bash`, `sh`, `openclaw`, `laizy`, `codex`, or `claude` in `tools.exec.safeBins`'), 'expected README fresh-install guidance to keep runtime binaries out of safeBins');
 assert(readmeSource.includes('Fresh install smoke check'), 'expected README to include a fresh-install smoke-check flow');
+assert(readmeSource.includes('Managed-runner artifacts are the durable bridge'), 'expected README to document managed-runner artifacts');
+assert(readmeSource.includes('managed-runner.launch-request'), 'expected README to describe managed-runner launch requests');
 const architectureDocSource = readFileSync('docs/ARCHITECTURE.md', 'utf8');
 assert(architectureDocSource.includes('resume-after-rebuild'), 'expected architecture docs to describe restart-safe resume-after-rebuild decisions');
 assert(architectureDocSource.includes('recover-before-continuing'), 'expected architecture docs to describe bounded recover-before-continuing decisions');
 assert(architectureDocSource.includes('verification-gated completion'), 'expected architecture docs to describe verification-gated completion');
+assert(architectureDocSource.includes('Managed-runner documents'), 'expected architecture docs to describe managed-runner documents');
+const managedRunnerDocSource = readFileSync('docs/MANAGED_RUNNERS.md', 'utf8');
+assert(managedRunnerDocSource.includes('managed-runner.result'), 'expected managed-runner docs to describe normalized result artifacts');
+assert(managedRunnerDocSource.includes('Worker completion is not milestone completion.'), 'expected managed-runner docs to preserve separation from milestone completion');
 const exampleRunDocSource = readFileSync('docs/EXAMPLE_RUN.md', 'utf8');
 assert(exampleRunDocSource.includes('continuation.recommendedDocumentKind'), 'expected example run docs to point operators at the next durable document');
 assert(exampleRunDocSource.includes('restart-safe path is intentionally artifact-first'), 'expected example run docs to describe artifact-first restart-safe recovery');
@@ -434,25 +502,40 @@ assert(metricsDocSource.includes('percent of healthy runs where `check-backends`
 assert(metricsDocSource.includes('Stage 5 backend/operator ergonomics should remain inspectable from repo artifacts and docs alone.'), 'expected metrics docs to keep Stage 5 backend/operator ergonomics artifact-first');
 assert(metricsDocSource.includes('`laizy check-backends` exposes a concise handoff summary before worker execution'), 'expected metrics docs to keep the operator-facing backend summary measurable');
 assert(metricsDocSource.includes('the README/operator docs describe the same repo-native control loop as the emitted backend adapters'), 'expected metrics docs to require consistency between docs and emitted adapters');
-assert(bootstrapManifest.documents.implementerSpawn, 'expected bootstrap manifest to include implementer spawn adapter path when the plan is not in needs-plan bootstrap mode');
+assert(bootstrapManifest.documents.implementerManagedRunnerRequest, 'expected bootstrap manifest to include a managed-runner request when the plan is not in needs-plan bootstrap mode');
+assert(bootstrapManifest.documents.implementerManagedRunnerLaunch, 'expected bootstrap manifest to include a managed-runner launch artifact when the plan is not in needs-plan bootstrap mode');
 assert(bootstrapManifest.documents.laizyWatchdog, 'expected bootstrap manifest to include a local watchdog adapter path');
 assert(bootstrapManifest.documents.watchdogBackendCheck, 'expected bootstrap manifest to include a watchdog backend health-check document');
-assert(bootstrapManifest.documents.codexImplementerExec, 'expected bootstrap manifest to include a codex implementer adapter path');
-assert(bootstrapManifest.documents.claudeImplementerExec, 'expected bootstrap manifest to include a claude implementer adapter path');
+assert(bootstrapManifest.documents.implementerProviderAdapter, 'expected bootstrap manifest to include the selected implementer provider adapter path');
+assert(bootstrapManifest.documents.implementerResultArtifact, 'expected bootstrap manifest to include the expected implementer result artifact path');
 assert(bootstrapManifest.documents.implementerBackendCheck, 'expected bootstrap manifest to include an implementer backend health-check document');
-const bootstrapSpawnAdapter = JSON.parse(readFileSync(bootstrapManifest.documents.implementerSpawn, 'utf8'));
-assert(bootstrapSpawnAdapter.kind === 'openclaw.sessions_spawn', 'expected bootstrap bundle to include a machine-readable spawn adapter');
-assert(bootstrapSpawnAdapter.runtimeProfile?.thinking, 'expected bootstrap spawn adapter to include runtime-profile data');
+const bootstrapManagedRunnerRequest = JSON.parse(readFileSync(bootstrapManifest.documents.implementerManagedRunnerRequest, 'utf8'));
+assert(bootstrapManagedRunnerRequest.kind === 'managed-runner.launch-request', 'expected bootstrap manifest to include a machine-readable managed-runner request');
+const bootstrapProviderAdapter = JSON.parse(readFileSync(bootstrapManifest.documents.implementerProviderAdapter, 'utf8'));
+assert(bootstrapProviderAdapter.kind === 'openclaw.sessions_spawn', 'expected bootstrap manifest to include the selected implementer provider adapter');
+assert(bootstrapProviderAdapter.runtimeProfile?.thinking, 'expected bootstrap provider adapter to include runtime-profile data');
 const bootstrapWatchdogAdapter = JSON.parse(readFileSync(bootstrapManifest.documents.laizyWatchdog, 'utf8'));
 assert(bootstrapWatchdogAdapter.kind === 'laizy.watchdog', 'expected bootstrap manifest to include a local watchdog adapter');
 assert(bootstrapWatchdogAdapter.payload.args[0] === 'watchdog', 'expected bootstrap local watchdog to use the watchdog subcommand');
 const bootstrapImplementerBackendCheck = JSON.parse(readFileSync(bootstrapManifest.documents.implementerBackendCheck, 'utf8'));
 assert(bootstrapImplementerBackendCheck.outputPath === bootstrapManifest.documents.implementerBackendCheck, 'expected bootstrap implementer backend check to record its output path');
-const bootstrapCodexImplementerExec = JSON.parse(readFileSync(bootstrapManifest.documents.codexImplementerExec, 'utf8'));
+const bootstrapImplementerLaunch = JSON.parse(readFileSync(bootstrapManifest.documents.implementerManagedRunnerLaunch, 'utf8'));
 assert(
-  bootstrapCodexImplementerExec.payload.backendCheck.outputPath === bootstrapManifest.documents.implementerBackendCheck,
-  'expected bootstrap implementer adapters to embed the exact written backend preflight result',
+  bootstrapImplementerLaunch.adapter.path === bootstrapManifest.documents.implementerProviderAdapter,
+  'expected bootstrap managed-runner launch to point at the selected provider adapter',
 );
+const managedRunnerCliResult = run(process.execPath, [
+  'dist/src/index.js',
+  'emit-managed-runner-launch',
+  '--snapshot',
+  cliBootstrapSnapshotPath,
+  '--out-dir',
+  path.join(tempDir, 'cli-managed-runner'),
+]);
+const managedRunnerCliOutput = JSON.parse(managedRunnerCliResult.stdout);
+assert(managedRunnerCliOutput.provider === 'openclaw', 'expected CLI managed-runner emission to preserve the configured provider');
+const persistedManagedRunnerRequest = JSON.parse(readFileSync(managedRunnerCliOutput.launchRequestPath, 'utf8'));
+assert(persistedManagedRunnerRequest.kind === 'managed-runner.launch-request', 'expected CLI managed-runner emission to persist a launch request');
 const unhealthyBackendConfigPath = path.join(tempDir, 'unhealthy-backend-config.json');
 writeFileSync(unhealthyBackendConfigPath, JSON.stringify({ implementer: 'codex-cli' }, null, 2));
 const originalPath = process.env.PATH;
@@ -573,12 +656,13 @@ assert(selectSupervisorRuntimeProfile(initialized.snapshot, 'closeout').model ==
 
 const continueBundle = writeSupervisorBundle(path.join(tempDir, 'supervisor', 'continue'), initialized.snapshot);
 assert(continueBundle.documents.implementerContract, 'expected continue bundle to include an implementer contract');
-assert(continueBundle.documents.implementerSpawn, 'expected continue bundle to include an OpenClaw implementer spawn adapter');
-assert(continueBundle.documents.codexImplementerExec, 'expected continue bundle to include a codex implementer adapter');
-assert(continueBundle.documents.claudeImplementerExec, 'expected continue bundle to include a claude implementer adapter');
+assert(continueBundle.documents.implementerManagedRunnerRequest, 'expected continue bundle to include a managed-runner request');
+assert(continueBundle.documents.implementerManagedRunnerLaunch, 'expected continue bundle to include a managed-runner launch artifact');
+assert(continueBundle.documents.implementerProviderAdapter, 'expected continue bundle to include the selected provider adapter');
 assert(continueBundle.documents.implementerBackendCheck, 'expected continue bundle to include an implementer backend health-check document');
 const persistedContinueDecision = JSON.parse(readFileSync(continueBundle.decisionPath, 'utf8'));
 assert(persistedContinueDecision.decision === 'continue', 'expected persisted continue decision to remain machine-readable');
+assert(persistedContinueDecision.continuation.recommendedDocumentKind === 'managed-runner.launch-request', 'expected continue decision to point operators at managed-runner launch requests');
 
 const verificationCommand = createVerificationCommand(initialized.snapshot, {
   command: '/usr/bin/node scripts/build-check.mjs',
@@ -630,8 +714,9 @@ const recoveryBundle = writeSupervisorBundle(path.join(tempDir, 'supervisor', 'r
   stallThresholdMinutes: 15,
 });
 assert(recoveryBundle.documents.recoveryPlan, 'expected recovery bundle to include a recovery plan');
-const persistedRecoverySpawn = JSON.parse(readFileSync(recoveryBundle.documents.recoverySpawn, 'utf8'));
-assert(persistedRecoverySpawn.runtimeProfile?.thinking === 'high', 'expected recovery spawn adapter to include a high-thinking runtime profile');
+assert(recoveryBundle.documents.recoveryManagedRunnerRequest, 'expected recovery bundle to include a managed-runner request');
+const persistedRecoveryAdapter = JSON.parse(readFileSync(recoveryBundle.documents.recoveryProviderAdapter, 'utf8'));
+assert(persistedRecoveryAdapter.runtimeProfile?.thinking === 'high', 'expected recovery provider adapter to include a high-thinking runtime profile');
 
 const recoveryPlanPath = writeRecoveryPlan(path.join(tempDir, 'recovery', 'plan.json'), recoveryPlan);
 const persistedRecoveryPlan = JSON.parse(readFileSync(recoveryPlanPath, 'utf8'));
@@ -646,11 +731,10 @@ const replanDecision = createSupervisorDecision(blocked.snapshot);
 assert(replanDecision.decision === 'replan', 'expected blocked milestones to request bounded replanning');
 const replanBundle = writeSupervisorBundle(path.join(tempDir, 'supervisor', 'replan'), blocked.snapshot);
 assert(replanBundle.documents.plannerRequest, 'expected replan bundle to include a planner request');
-assert(replanBundle.documents.plannerSpawn, 'expected replan bundle to include a planner spawn adapter');
-assert(replanBundle.documents.codexPlannerExec, 'expected replan bundle to include a codex planner adapter');
-assert(replanBundle.documents.claudePlannerExec, 'expected replan bundle to include a claude planner adapter');
-const persistedReplanSpawn = JSON.parse(readFileSync(replanBundle.documents.plannerSpawn, 'utf8'));
-assert(persistedReplanSpawn.payload.promptDocument?.requestedMode === 'replan', 'expected replan planner spawn to carry replan mode');
+assert(replanBundle.documents.plannerManagedRunnerRequest, 'expected replan bundle to include a planner managed-runner request');
+assert(replanBundle.documents.plannerProviderAdapter, 'expected replan bundle to include a planner provider adapter');
+const persistedReplanAdapter = JSON.parse(readFileSync(replanBundle.documents.plannerProviderAdapter, 'utf8'));
+assert(persistedReplanAdapter.payload.promptDocument?.requestedMode === 'replan', 'expected replan planner provider adapter to carry replan mode');
 
 const replanned = transitionMilestone(snapshotPath, {
   milestoneId: targetMilestoneId,
@@ -687,6 +771,19 @@ const reportPath = writeHealthReport(path.join(tempDir, 'reports', 'health.json'
 const persistedReport = JSON.parse(readFileSync(reportPath, 'utf8'));
 assert(persistedReport.overallStatus === 'healthy', 'expected persisted health report to remain machine-readable');
 
+const managedRunnerResultRecord = recordManagedRunnerResult(snapshotPath, {
+  launchArtifactPath: managedRunnerBundle.launchArtifactPath,
+  outcome: 'succeeded',
+  exitCode: 0,
+  tracking: {
+    kind: 'session-key',
+    id: 'implementer-session-1',
+  },
+  summary: 'Managed implementer run completed successfully.',
+});
+assert(managedRunnerResultRecord.snapshot.managedRunners.results.length === 1, 'expected managed-runner result recording to persist into snapshot state');
+assert(managedRunnerResultRecord.snapshot.managedRunners.results[0]?.outcome === 'succeeded', 'expected managed-runner result to normalize successful completion');
+
 const verifying = transitionMilestone(snapshotPath, {
   milestoneId: targetMilestoneId,
   status: 'verifying',
@@ -702,6 +799,7 @@ const verifyBundle = writeSupervisorBundle(path.join(tempDir, 'supervisor', 'ver
   verificationCommand: '/usr/bin/node scripts/build-check.mjs',
 });
 assert(verifyBundle.documents.verificationCommand, 'expected verify bundle to include a verification command');
+assert(verifyBundle.documents.verifierManagedRunnerRequest, 'expected verify bundle to include a verifier managed-runner request');
 const persistedVerifyCommand = JSON.parse(readFileSync(verifyBundle.documents.verificationCommand, 'utf8'));
 assert(persistedVerifyCommand.runtimeProfile?.reasoningMode === 'hidden', 'expected verification command document to include runtime-profile data');
 
@@ -739,7 +837,7 @@ const expectedRunStatus = expectedRemainingMilestoneId ? 'planned' : 'completed'
 
 assert(completed.snapshot.currentMilestoneId === expectedRemainingMilestoneId, 'expected completed milestone to advance current pointer to the next incomplete milestone');
 assert(completed.snapshot.status === expectedRunStatus, 'expected run status to reflect whether incomplete milestones remain');
-assert(completed.snapshot.eventCount === 9, 'expected initialization, recovery, heartbeat, verification, and milestone transitions in event log');
+assert(completed.snapshot.eventCount === 11, 'expected initialization, managed-runner, recovery, heartbeat, verification, and milestone transitions in event log');
 
 if (completed.snapshot.status === 'completed') {
   const closeoutDecision = createSupervisorDecision(completed.snapshot);
@@ -762,9 +860,11 @@ assert(persisted.currentMilestoneId === expectedRemainingMilestoneId, 'expected 
 assert(persisted.milestones.find((milestone) => milestone.id === targetMilestoneId)?.status === 'completed', 'expected persisted active milestone status to be completed');
 assert(persisted.recovery.length === 1, 'expected persisted snapshot to retain recovery action history');
 assert(persisted.verification.length === 1, 'expected persisted snapshot to retain verification history');
+assert(persisted.managedRunners.launches.length >= 1, 'expected persisted snapshot to retain managed-runner launch history');
+assert(persisted.managedRunners.results.length >= 1, 'expected persisted snapshot to retain managed-runner result history');
 
 const events = loadRunEvents(eventLogPathForSnapshot(snapshotPath));
-assert(events.length === 9, 'expected event log to contain nine events');
+assert(events.length === 11, 'expected event log to contain eleven events');
 
 const emptyPlanPath = path.join(tempDir, 'EMPTY_IMPLEMENTATION_PLAN.md');
 writeFileSync(emptyPlanPath, '# Empty plan for bootstrap verification\n', 'utf8');
@@ -784,7 +884,7 @@ const emptyPlanDecision = createSupervisorDecision(emptyRunState);
 assert(emptyPlanDecision.decision === 'plan', 'expected empty plans to drive a planner decision instead of closeout');
 const emptyPlanBundle = writeSupervisorBundle(path.join(tempDir, 'supervisor', 'plan-needed'), emptyRunState);
 assert(emptyPlanBundle.documents.plannerRequest, 'expected plan-needed bundles to include a planner request');
-assert(emptyPlanBundle.documents.plannerSpawn, 'expected plan-needed bundles to include a planner spawn adapter');
+assert(emptyPlanBundle.documents.plannerManagedRunnerRequest, 'expected plan-needed bundles to include a planner managed-runner request');
 
 const emptySnapshotPath = path.join(tempDir, 'empty-run.json');
 const emptyStartRunResult = run(process.execPath, [
@@ -804,11 +904,10 @@ assert(emptyStartRunOutput.currentMilestoneId === null, 'expected empty plan boo
 const emptyBootstrapManifest = JSON.parse(readFileSync(emptyStartRunOutput.manifestPath, 'utf8'));
 assert(emptyBootstrapManifest.planState.status === 'needs-plan', 'expected empty plan bootstrap manifest to preserve needs-plan state');
 assert(emptyBootstrapManifest.documents.plannerRequest, 'expected empty plan bootstrap manifest to include a planner request document');
-assert(emptyBootstrapManifest.documents.openClawPlannerSpawn, 'expected empty plan bootstrap manifest to include an OpenClaw planner spawn adapter');
-assert(emptyBootstrapManifest.documents.codexPlannerExec, 'expected empty plan bootstrap manifest to include a codex planner adapter');
-assert(emptyBootstrapManifest.documents.claudePlannerExec, 'expected empty plan bootstrap manifest to include a claude planner adapter');
+assert(emptyBootstrapManifest.documents.plannerManagedRunnerRequest, 'expected empty plan bootstrap manifest to include a planner managed-runner request');
+assert(emptyBootstrapManifest.documents.plannerProviderAdapter, 'expected empty plan bootstrap manifest to include the selected planner provider adapter');
 assert(emptyBootstrapManifest.documents.plannerBackendCheck, 'expected empty plan bootstrap manifest to include a planner backend health-check document');
-assert(!emptyBootstrapManifest.documents.implementerSpawn, 'expected empty plan bootstrap manifest to avoid emittting implementer spawn instructions');
+assert(!emptyBootstrapManifest.documents.implementerManagedRunnerRequest, 'expected empty plan bootstrap manifest to avoid emitting implementer managed-runner instructions');
 const persistedPlannerRequest = JSON.parse(readFileSync(emptyBootstrapManifest.documents.plannerRequest, 'utf8'));
 assert(persistedPlannerRequest.kind === 'planner.request', 'expected persisted bootstrap planner request to remain machine-readable');
 assert(persistedPlannerRequest.triggerReason.includes('actionable milestones'), 'expected planner request trigger reason to explain the missing actionable plan');

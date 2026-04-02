@@ -99,5 +99,9 @@ export function createRunState({
     })),
     recovery: [],
     verification: [],
+    managedRunners: {
+      launches: [],
+      results: [],
+    },
   };
 }

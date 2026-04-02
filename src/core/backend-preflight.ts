@@ -154,18 +154,38 @@ function execProbe(
 ): BackendHealthProbe {
   const timeoutMs = Number(options.timeoutMs ?? 5000);
   const timeoutSeconds = Math.max(1, Math.ceil(timeoutMs / 1000));
-  const result = spawnSync('/usr/bin/timeout', [
+  const spawnOptions = {
+    encoding: 'utf8',
+    maxBuffer: 1024 * 1024,
+    shell: options.useShell ?? false,
+  } as const;
+  let result = spawnSync('/usr/bin/timeout', [
     '--signal=TERM',
     '--kill-after=1s',
     `${timeoutSeconds}s`,
     command,
     ...args,
-  ], {
-    encoding: 'utf8',
-    maxBuffer: 1024 * 1024,
-    shell: options.useShell ?? false,
-  });
+  ], spawnOptions);
+
+  const timeoutErrorCode = result.error && 'code' in result.error && typeof result.error.code === 'string'
+    ? result.error.code
+    : null;
+
+  // Some restricted runtimes disallow `/usr/bin/timeout` even when the actual probe command is allowed.
+  // Fall back to a direct spawn so preflight can still report the backend's real behavior.
+  if (timeoutErrorCode === 'EPERM' || timeoutErrorCode === 'ENOENT') {
+    result = spawnSync(command, args, spawnOptions);
+  }
   const output = [result.stdout, result.stderr].filter(Boolean).join('\n').trim();
+
+  if (result.status === 0 && !result.signal) {
+    return createProbe(
+      name,
+      'passed',
+      output ? `${detail} Output: ${output}` : detail,
+      [command, ...args].join(' '),
+    );
+  }
 
   if (result.error) {
     const errorCode = 'code' in result.error && typeof result.error.code === 'string'
@@ -188,12 +208,7 @@ function execProbe(
     return createProbe(name, 'failed', output ? `${timeoutDetail} Output: ${output}` : timeoutDetail, [command, ...args].join(' '));
   }
 
-  return createProbe(
-    name,
-    result.status === 0 ? 'passed' : 'failed',
-    output ? `${detail} Output: ${output}` : detail,
-    [command, ...args].join(' '),
-  );
+  return createProbe(name, 'failed', output ? `${detail} Output: ${output}` : detail, [command, ...args].join(' '));
 }
 
 function readablePathProbe(name: BackendHealthProbe['name'], detail: string, targetPath: string | null, command: string | null): BackendHealthProbe {
