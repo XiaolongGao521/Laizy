@@ -1,6 +1,6 @@
 {
   "name": "laizy",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Open-source orchestration layer for Claude Code, Codex, OpenClaw, and other coding agents.",
   "license": "MIT",
   "type": "module",
